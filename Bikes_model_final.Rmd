@@ -1,0 +1,829 @@
+
+This notebook uses LSOA_newvariables_oldnev
+Check code and comment is this the final notebook or not?
+
+
+```{r}
+#Load libraries
+library(rgdal)
+library(maptools)
+library(raster)
+library(rgeos)
+library(tmap)
+library(dplyr)
+library(tidyr)
+#install.packages("GISTools")
+library(ggplot2)
+library(sp)
+library(car)
+library(sf)
+#install.packages("corrplot")
+library(corrplot)
+#install.packages("car")
+library(ENVS450)
+library(tidyverse)
+library(stats)
+```
+
+```{r}
+getwd()
+```
+
+```{r}
+rm (list=ls( ))
+```
+
+
+```{r}
+#Load shapefile and csv
+commute <- read.csv("LCR_methodTraveltoWork_LSOA.csv")
+```
+
+
+```{r}
+#change data types
+#LSOA$y2160 = as.numeric(as.vector(LSOA$X21.60y))
+```
+
+```{r}
+#Check data types
+#lapply(LSOA@data, class)
+#str(LSOA$data)
+```
+
+
+```{r}
+#check projection
+#st_crs(pop)
+```
+
+### Commute and population variables
+```{r}
+#Calculate proportion of people that use bike
+commute$perc_bike <- (commute$bicycle/commute$all) * 100
+#Calculate proportion using public transport
+commute$perc_ptrans <- ((commute$train_tube + commute$bus + commute$taxi_other)/commute$all)*100
+#calculate proportion using car or motorbike
+commute$perc_car <- ((commute$car_driver + commute$car_passenger + commute$motorbike)/commute$all)*100
+```
+
+```{r}
+head(commute)
+```
+
+
+```{r}
+#Subset commute csv
+commute_bike <- commute[,c(1,2,14,15,16,17)]
+#rename columns
+colnames(commute_bike) <- c("LSOACD", "LSOA_name", "Slope", "Bike","PublicTransp", "Car" )
+head(commute_bike)
+```
+
+
+LSOA_pop <- LSOA_pop[,c(1:3,6,8,14,15,12,22,23,33,34,36,38,40,41,43,44,45)]
+#### Population data
+```{r}
+#load population file
+pop <- st_read(".", "LSOA_newvariables_all")
+#subset LSOA shapefile 
+LSOA_pop <- pop[,c(1:3,6,8,14,15,22,23,33,34,37,39,41,42,44:46)]
+head(LSOA_pop)
+lapply(LSOA_pop, class)
+```
+
+```{r}
+#change station binary to numeric
+LSOA_pop$Stn_bin <- as.numeric(paste(LSOA_pop$Stn_bin))
+head(LSOA_pop)
+```
+
+
+```{r}
+#join commute and LSOA shapefile
+LSOA_bike_pop <- merge(LSOA_pop, commute_bike, by.x = "LSOA11CD", by.y = "LSOACD", all.x=TRUE)
+head(LSOA_bike_pop)
+```
+
+
+#### IMD variable
+```{r}
+#read IMD csv
+IMD <- read.csv("IMD_LCR_2015.csv")
+```
+
+```{r}
+#subset shapefile data
+IMD <- IMD[,c(1,5)]
+#rename columns
+colnames(IMD) <- c("LSOACD", "IMD_Score")
+head(IMD)
+```
+
+```{r}
+#Join IMD with LSOA
+LSOA_IMD <- merge(LSOA_bike_pop, IMD, by.x ="LSOA11CD", by.y= "LSOACD", all.x=TRUE)
+head(LSOA_IMD)
+```
+
+#### Green area and cycling variables
+```{r}
+#Load shapefiles
+green <- st_read(".","LCR_GreenArea")
+LSOA <- st_read(".", "LSOA_codes")
+cycle_lane <- read_sf("cycle_final.shp")
+```
+
+
+```{r}
+#change data types
+#LSOA$y2160 = as.numeric(as.vector(LSOA$X21.60y))
+```
+
+```{r}
+#Check data types
+#lapply(LSOA@data, class)
+#str(LSOA$data)
+```
+
+
+```{r}
+#check projection
+st_crs(green)
+st_crs(LSOA)
+st_crs(cycle_lane) # this is wgs84
+```
+
+```{r}
+#Calculate green area per LSOA
+#transform data from sp to sf
+#green_sf <- st_as_sf(green)
+#LSOA_sf <- st_as_sf(LSOA)
+
+options(scipen = 5)
+#intersect datasets and convert the result to tibble
+intersection <- as_tibble(st_intersection(green, LSOA))
+#intersection <- st_intersection(LSOA, green)
+
+#add an area calculation of each green area intersected with LSOA  column to the tibble 
+intersection$Area_Gr <- st_area(intersection$geometry)
+
+#plot the layers
+#plot (green$geometry, col='green')
+#plot(LSOA$geometry, add=T)
+#plot(intersection$geometry, col='red', add=T)
+
+#group data by LSOA area and calculate the total greenspace area per LSOA
+#output as new tibble
+#area_LSOA <- intersection %>%
+#  group_by(LSOA11CD) %>%
+#  summarise(Area_Gr = sum(Area_Gr))
+intersection <- aggregate(intersection$Area_Gr, by=list(LSOA11CD=intersection$LSOA11CD), FUN=sum)
+#change column names
+colnames(intersection) <- c("LSOA11CD", "Area_Gr")
+#Change numbers to numeric
+intersection$Area_Gr <- as.numeric(intersection$Area_Gr)
+#join area_LSOA dataframe with LSOA shapefile
+green_LSOA <- left_join(LSOA, intersection, by.x = "LSOA11CD", by.y = "LSOA11CD", all.x=TRUE)
+```
+
+```{r}
+head(green_LSOA)
+lapply(green_LSOA, class)
+```
+
+
+```{r}
+#create proportion of green area per lsoa
+green_LSOA$prop_green <- (green_LSOA$Area_Gr/green_LSOA$AreaM2)*100
+```
+
+```{r}
+#Save shape
+#writeOGR(Green_LSOAarea, ".", "LSOA_IMD", driver="ESRI Shapefile")
+```
+
+#### cycle lane variable
+
+```{r}
+#reproject
+cycle_proj <- st_transform(cycle_lane, crs = st_crs(green))
+```
+
+```{r}
+#Save reprojected cycling shape
+#st_write(cycle_proj, "cycle_all_proj.shp", driver = "ESRI Shapefile")
+```
+
+
+```{r}
+#check projection
+st_crs(green)
+st_crs(cycle_proj)
+st_crs(LSOA)
+```
+
+
+#transform data from sp to sf
+cycle_sf <- st_as_sf(green)
+#LSOA_sf <- st_as_sf(LSOA)
+
+https://gis.stackexchange.com/questions/280760/intersecting-lines-and-polygons-and-calculating-line-length-in-r
+
+```{r}
+#intersect cycle with LSOA and convert the result to tibble
+intersection_cycle <- as_tibble(st_intersection(cycle_proj, LSOA))
+
+#calculate length of cycle in each polygon
+intersection_cycle$Length <- st_length(intersection_cycle$geometry)
+
+#group data by LSOA and calculate the total cycle lane length per LSOA
+length_LSOA <- intersection_cycle %>%
+  group_by(LSOA11CD) %>%
+  summarise(Length = sum(Length))
+#change data type units of cycle lane length to numeric (from units with m suffix)
+length_LSOA$Length <- as.numeric(length_LSOA$Length)
+```
+
+```{r}
+#total length of cycling infrastructure in LCR
+total_length <- sum(length_LSOA$Length)
+total_length
+```
+
+
+Create a proportion of cycle lanes per LSOA with route cycleway added
+Total of cycle lanes in all LCR is 736,832.3 mts/ 736.8km, mean 660.59m, range min max 0.082 - 21941.29m. Interquartile range 1st quartile 236.66, 3rd quartile 1377.66
+Total cycle lane per Borough
+Halton 175285.77m/ 175.28km
+Knowlsey 62402.19/ 62.40 km
+Liverpool 195203.43m/ 195.20km
+Sefton 119563.78m / 119.56km
+St Helens 62012.93m/ 62.01km
+Wirral 122364.16m/ 122.36km
+
+```{r}
+#create proportion of cycle lane per lsoa
+length_LSOA$prop_lane <- (length_LSOA$Length/total_length)*100
+#merge with original LSOA data
+green_cycle <-merge(green_LSOA, length_LSOA, by.x = "LSOA11CD", by.y = "LSOA11CD", all.x=TRUE)
+head(green_cycle)
+```
+
+
+
+Old cycling lengths were calculated without merging "route - bicycle"" from OSM. Old values and model is csv called LSOA_model_old.csv
+
+Total of cycle lanes in all LCR is 352,991 mts, mean 247m, range min max 0.83 - 5368. Interquartile range 1st wuartile 28.8686, 3rd quartile 267.975
+Total cycle lane per Borough
+Halton 98048.18215
+Knowlsey 33650.11874
+Liverpool 57777.48235
+Sefton 58115.4427
+St Helens 42762.64236
+Wirral 61872.82516
+
+
+Green_cycle has green area and proportion of green, also has total length of cycling lane
+```{r}
+#convert sf to dataframe
+green_cycledf <- green_cycle %>% st_set_geometry(NULL)
+class(green_cycledf)
+```
+
+
+##### Merge all data to create the final model
+```{r}
+#merge with original LSOA data
+LSOA_model <-full_join(LSOA_IMD, green_cycledf, by = "LSOA11CD")
+head(LSOA_model)
+```
+
+```{r}
+nrow(LSOA_model)
+```
+
+
+```{r}
+summary(LSOA_model$Length)
+```
+
+```{r}
+#https://datacarpentry.org/R-genomics/04-dplyr.html
+#sum cycling length per borough in m
+total_cycle <- LSOA_model %>% 
+  group_by(layer) %>%
+  summarise(Length = sum(Length, na.rm = TRUE))
+total_cycle
+```
+
+Halton	175285.77		
+Knowsley	62402.19	
+Liverpool	195203.43			
+Sefton	119563.79			
+StHelens	62012.93			
+Wirral	122364.16
+
+
+```{r}
+#Transform sf greencycle to dataframe or we get an unordered dataframe if exported as csv
+#green_df <- green_cycle %>% st_set_geometry(NULL)
+#class(green_df)
+```
+
+
+```{r}
+#Save shape
+#st_write(LSOA_model_shp, "LSOA_model.shp", driver="ESRI Shapefile")
+#Save as csv
+#write.csv(green_cycle, file="green_cycle.csv")
+#greenarea_lane <- read.csv("green_cycle.csv")
+```
+
+
+https://gis.stackexchange.com/questions/224915/extracting-data-frame-from-simple-features-object-in-r
+
+https://stackoverflow.com/questions/26049011/r-programming-how-to-filter-then-sum
+```{r}
+#Transform sf LSOA_model_shp to dataframe or we get an unordered dataframe if exported as csv
+model_df <- LSOA_model %>% st_set_geometry(NULL)
+class(model_df)
+```
+
+```{r}
+head(model_df)
+ncol(model_df)
+nrow(model_df)
+```
+
+```{r}
+summary(model_df$pr_more20k)
+```
+
+```{r}
+head(LSOA_model)
+ncol(LSOA_model)
+```
+
+
+```{r}
+#Save as csv
+#write.csv(LSOA_df, file="LSOA_model_all.csv")
+#Load model data
+#LSOA_model <-read.csv("LSOA_model.csv")
+#Replace NA values
+LSOA_model[,26:29][is.na(LSOA_model[,26:29])] <- 0
+head(LSOA_model)
+#replace in model df
+model_df[,26:29][is.na(model_df[,26:29])] <- 0
+head(model_df)
+```
+
+
+```{r}
+#create the summary of all variables
+#lapply(2:ncol(LSOA_model), function(j) summary(LSOA_model[c(1, j)], measurevar = 2, groupvars = 1))
+#Obtain the summary of all variables
+for(i in 2:ncol(LSOA_model)){
+    summary<-summary(LSOA_model, measurevar = LSOA_model[,i], groupvars = LSOA_model[1])
+}
+head(summary)
+```
+
+```{r}
+summary(LSOA_model)
+```
+
+
+
+##### Correlation and correlogram
+Check correlation of variables
+
+```{r}
+#lapply(model_df, class)
+head(model_df)
+```
+
+```{r}
+head(correlation_m)
+ncol(correlation_m)
+```
+
+
+```{r}
+#subset lsoa to remove categorical variables
+correlation_m <- cor(model_df[,c(3:5,7:18,20:24,27,29)])
+#Rename columns
+colnames(correlation_m) <- c("Station", "Density","Density_day","Male","no Car", "1Car", "1-5km", "5-10km", "NS-SeC1-2","NS-SeC5-7","User1645", "more10km","Rain", "MaxTemp", "MinTemp","Slope", "Bike", "PublicTrans", "Car", "IMD", "Green_Area","Lane")
+#create correlation results
+cor_results<- cor.results(correlation_m, sort.by = "abs.r", data = model_df, var.name = "Bike")
+cor_results
+```
+
+```{r}
+head(model_df)
+ncol(corr_matrix)
+```
+
+
+```{r}
+#less variables
+#subset lsoa to remove categorical variables
+corr_matrix <- cor(model_df[,c(3:7,9,10,11,16,17,19,20,22,24,26:30,33,35)])
+#Rename columns
+colnames(corr_matrix) <- c("Station", "Density","Density_day", "User1660", "Female", "Rain", "no Car", "1Car", "1-5km", "5-10km","more20km","NS-SeC1-2", "NS-SeC5-7", "User1645", "Slope", "Bike", "PublicTrans", "Car", "IMD", "Green_Area","Lane")
+#create correlation results
+cor_results2<- cor.results(corr_matrix, sort.by = "abs.r", data = model_df, var.name = "Bike")
+cor_results2
+```
+
+```{r}
+#Load old LSOA model
+#model_old <- read.csv("LSOA_model_old.csv")
+#subset lsoa to remove categorical variables
+#correlation_old <- LSOA_model[,c(5,9,10,12:16,19,21,22)]
+#Rename columns
+#colnames(correlation) <- c( "User","Density", "Slope","Bike","PublicTrans","Car","IMD","Green_Area","Lane_tot", "Lane_loc" )
+#create correlation matrix
+#corr_old_m <- cor(correlation_old)
+#create results df 
+#corr_old_res<- cor.results(corr_old_m, sort.by = "abs.r", data = correlation_old, var.name = "Bike")
+#corr_old_res
+```
+
+
+
+```{r}
+#Check correlation of lane
+cor_results_lane <- cor.results(correlation_m, sort.by = "abs.r", data = correlation_m, var.name = "Lane_tot")
+cor_results_lane
+```
+
+
+```{r}
+#create correlation matrix
+corr_matrix <- cor(correlation_m)
+#create correlogram
+#corrplot(corr_matrix, type="upper", order = "hclust", col=brewer.pal(n = 8, name= "RdYlBu"), tl.col = "black", tl.srt = 45, tl.cex = .8, number.cex = .5)
+```
+
+```{r}
+#correlation for less variables
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+plot <- corrplot(corr_matrix, order =  "hclust", method = "color", col = col(200),
+         type = "upper", number.cex = .5,
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, tl.cex = 0.5,
+         # Text label color and rotation
+         # Combine with significance
+         #p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+         # hide correlation coefficient on the principal diagonal
+         diag = FALSE)
+```
+
+, order = "hclust"
+```{r}
+#correlagram for many variables (final)
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+plot <- corrplot(correlation_m, method = "color", col = col(200),
+         type = "upper", number.cex = .5,
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col = "black", tl.srt = 90, tl.cex = 0.7,
+         # Text label color and rotation
+         # Combine with significance
+         #p.mat = p.mat, sig.level = 0.01, insig = "blank", 
+         # hide correlation coefficient on the principal diagonal
+         diag = FALSE)
+```
+The sign of the coefficient indicates the direction of the relationship. If both variables tend to increase or decrease together, the coefficient is positive, and the line that represents the correlation slopes upward. If one variable tends to increase as the other decreases, the coefficient is negative, and the line that represents the correlation slopes downward.
+
+
+Correlation coefficients - definition
+A correlation between variables indicates that as one variable changes in value, the other variable tends to change in a specific direction. A correlation coefficient measures both the direction and the strength of this tendency to vary together.
+
+-A positive correlation indicates that as one variable increases the other variable tends to increase.
+-A correlation near zero indicates that as one variable increases, there is no tendency in the other variable to either increase or decrease.
+-A negative correlation indicates that as one variable increases the other variable tends to decrease.
+
+Correlation
+Car has a strong negative correlation with public transport, IMD and bike usage. This correlation represents that as car usage increase, ublic transport, bike usage and IMD tend to decrease. In contrast, when pulic transport usage increase, so does IMD score in an area. For bike usage, the strongest positive correlation is with density of population and the created cyclists profile. In this vein, cycle lane does not display strong correlation with cycling
+
+```{r}
+corrplot(correlation_m, method="number", type="lower", bg="pink")
+```
+
+
+```{r}
+corrplot.mixed(correlation_m, lower.col = "black", number.cex = .7, tl.cex = .5, tl.col="orange" )
+```
+
+
+
+```{r}
+#activate scientific notation
+options(scipen = 2)
+#options(digits = 5)
+```
+
+### Create the model for the entire LCR
+#### Joint model
+```{r}
+head(model_df)
+```
+colnames(correlation_m) <- c("Station", "Density",, "User", "Female", "Male","Rain", "no_car", "1Car", "2cars", "3cars","4cars","1-5km", "5-10km", "10-20km", "more20km","NS-SeC1-2", "NS-SeC3-4", "NS-SeC5-7", "NS-SeC student", "Slope", "Bike", "PublicTrans", "Car", "IMD", "IMD income", "Green_Area","Lane")
+
+```{r}
+#subset model_df to required columns
+model_df <- model_df[,c(1:7,9:11,16:20,22,24,26:30,33,35)]
+#rename column names in LSOA model
+colnames(model_df) <- c("LSOACD", "layer","Stn_bin", "Density","Density_day","User_prop", "female", "rain","no_car", "car1", "pr_1.5km", "pr_5.10km", "pr_10.20km", "more20km","NSSeC12", "NSSeC567","pr_16.45", "Slope", "Bike", "PublicTransp", "Car", "IMD_Score","prop_green", "prop_lane")
+head(model_df)
+```
+
+```{r}
+head(LSOA_model)
+```
+#Create the linear regression model, dependant variable perc bike
+model1 <- lm('Bike  ~ Stn_bin + pr_16.45+ Density + Density_da + male_prop + per_nocars +perc_1car+ pr_km1.5+pr_km5.10 + pr_more10k + rain+ maxtemp + mintemp + pr_nssec12 +pr_nsec567 +Slope  + PublicTransp + IMD_Score + prop_green + prop_lane', LSOA_model)
+summary(model1)
+
+```{r}
+#Create the linear regression model, dependant variable perc bike
+model1 <- lm('Bike  ~ Stn_bin + pr_16.45+ Density + Density_da + male_prop + per_nocars +perc_1car+ pr_km1.5+ pr_more10k + rain+ maxtemp + mintemp + pr_nssec12 +pr_nsec567 +Slope  + PublicTransp + IMD_Score + prop_green + prop_lane', LSOA_model)
+summary(model1)
+```
+R-squared usually increases as variables increase. that is why AIC is reliable to check fo model
+```{r}
+vif(model1)
+```
+
+vif(model1)
+
+```{r}
+skew(model_df$Bike)
+```
+
+
+```{r}
+#check skewness
+ggplot(data=model_df) +
+  geom_density( aes(x=Bike))
+```
+
+```{r}
+model_df$logbike <- model_df$log1p(Bike)
+```
+
+```{r}
+summary(LSOA_model)
+```
+
+
+```{r}
+head(LSOA_model)
+```
+
+Old model
+model1.log <- lm('log1p(Bike)  ~ User_prop + Stn_bin + Density + Slope + PublicTransp + IMD_Score + prop_green + prop_lane', model_df)
+summary(model1.log)
+
+model1.log <- lm('log1p(Bike)  ~ Stn_bin + user_prop + Density + Density_da + male_prop + mean_rain + per_nocars + pr_km1.5+pr_km10.20 + pr_nssec12 +pr_student +Slope + PublicTransp + Car + prop_green + prop_lane', LSOA_model)
+summary(model1.log)
+
+'Bike  ~ Stn_bin + user_prop + Density + Density_da + fem_prop + mean_rain + per_nocars +perc_1car+ pr_km1.5+pr_km10.20 + pr_nssec12 +pr_nsec567 +Slope  + PublicTransp + IMD_Score + prop_green + prop_lane',
+```{r}
+#FINAL MODEL
+#http://rpubs.com/marvinlemos/log-transformation
+#create another model for log of bikes and check coefficients
+#Create the linear regression model, dependant variable perc bike
+model1.log <- lm('log1p(Bike) ~ pr_16.45+ Density + male_prop + IMD_Score + pr_nssec12 + per_nocars +perc_1car+ pr_km1.5+ pr_km5.10 + rain+ Slope + PublicTransp + prop_green + Stn_bin + prop_lane', LSOA_model)
+summary(model1.log)
+```
+
+```{r}
+vif(model1.log)
+```
+
+```{r}
+AIC(model1, model1.log)
+```
+
+```{r}
+gvlma ::gvlma(model1.log)
+```
+
+```{r}
+cbind(summary(model1)$coefficients,confint(model1))
+```
+
+
+
+
+
+
+#Standardize perc_car
+https://stackoverflow.com/questions/15215457/standardize-data-columns-in-r
+
+Standardize variables
+
+zVar <- (myVar - mean(myVar)) / sd(myVar)
+
+dplyr: mutate(var = (var - mean(var))/sd(var))
+to denormalize  newVar <- (zVar * sd(myVar)) + mean(myVar). You have to use the original mean
+```{r}
+#Standardize is substract the mean a and divide by standard deviation
+LSOA_model$perc.car.st <- (LSOA_model$perc_car - mean(LSOA_model$perc_car)) / sd(LSOA_model$perc_car)
+
+```
+
+```{r}
+head(LSOA_model)
+```
+
+```{r}
+#Recreate model with transformed bike and car variables
+#Rerun the model
+model1.tr <- lm('perc_bike_tr  ~ Density + User_prop + Stn_bin+ perc_ptrans + perc.car.st+ IMD_Score + prop_lane + avslope_perc_u10km', LSOA_model)
+summary(model1.tr)
+```
+
+```{r}
+#Recreate model2 with transformed bike and remove car variable
+model2.tr <- lm('perc_bike_tr  ~ Density + User_prop + Stn_bin+ perc_ptrans + IMD_Score + prop_lane + avslope_perc_u10km', LSOA_model)
+summary(model2.tr)
+```
+
+```{r}
+summary(model2)
+```
+
+```{r}
+#remove the variable with the highest p-value, cycle-lane
+model4 <- lm('perc_bike_tr  ~ Density + User_prop + Stn_bin+ perc_ptrans + IMD_Score  + avslope_perc_u10km', LSOA_model)
+summary(model4)
+```
+
+
+```{r}
+vif(model1)
+```
+model 1 woth all variables untransformed
+model1_tr bike is transformed to achieve normality
+model 2 car removed
+model2-tr bike and car transformed
+model 3 public transport removed
+model 4 remove cycle lane
+```{r}
+AIC(model1, model1_tr, model2, model2.tr)
+```
+
+#Model is linear
+```{r}
+crPlots(model2)
+```
+
+
+#Checking for collinearity
+create a model without any spatial data, export lsoamodel to csv and run them.
+model 1 all variables
+model 2 remove per car
+model 3 remove per p transport
+```{r}
+vif(model1_tr)
+```
+
+```{r}
+vif(model1.log)
+```
+
+```{r}
+summary(model2)
+```
+
+
+```{r}
+mean(vif(model1.log))
+```
+
+
+##Create a model for Liverpool
+```{r}
+#Subset LSOA_model for Liverpool only
+model_liv <- LSOA_model[LSOA_model$layer == 'Liverpool',]
+head(model_liv)
+```
+
+Liv_model <- lm('Bike  ~ User_prop + Stn_bin+ Density + male + rain + no_car + pr_1.5km + pr_5.10km + pr_10.20km + more20km + NSSeC12 + NSSeC34 + NSSeC567 + Slope + Car + PublicTransp + IMD_Score+ prop_green + prop_lane', model_liv)
+
+```{r}
+st_write(model_liv, "model_liv.csv")
+```
+
+
+```{r}
+model_wirr <-  model_df[LSOA_model$layer == 'Wirral',]
+head(model_wirr)
+```
+
+
+```{r}
+#Create model for Liverpool
+Liv_model <- lm('Bike  ~ pr_16.45 + Stn_bin+ Density + male_prop + mintemp + per_nocars + perc_1car+ pr_km1.5 + pr_km5.10 + pr_km5.10 + pr_nssec12 + Slope + PublicTransp + IMD_Score+ prop_green + prop_lane', model_liv)
+summary(Liv_model)
+```
+
+```{r}
+vif(Liv_model)
+```
+
+```{r}
+head(model_liv)
+```
+
+ ~ Stn_bin + pr_16.45+ Density + Density_da + fem_prop + mean_rain + per_nocars +perc_1car+ pr_km1.5+pr_km10.20 + pr_nssec12 +pr_nsec567 +Slope  + PublicTransp + IMD_Score + prop_green + prop_lane',
+
+'log1p(Bike) ~ Stn_bin + pr_16.45+ Density + male_prop + per_nocars +perc_1car+ pr_km1.5+ pr_more10k + rain+ maxtemp + pr_nssec12 +Slope  + PublicTransp + IMD_Score + prop_green + prop_lane'
+
+```{r}
+#FINAL MODEL
+#Create model for Liverpool log transformed prop bike
+liv_log <- lm('log1p(Bike) ~ pr_16.45+ Density + male_prop + IMD_Score + pr_nssec12 + per_nocars +perc_1car+ pr_km1.5+ pr_km5.10 + rain+Slope +  + PublicTransp + prop_green + Stn_bin + prop_lane', model_liv)
+summary(liv_log)
+```
+
+```{r}
+vif(liv_log)
+```
+
+
+```{r}
+gvlma ::gvlma(liv_log)
+```
+
+
+```{r}
+#Subset LSOA_model for Wirral
+model_wirr <- LSOA_model[LSOA_model$layer == 'Wirral',]
+head(model_wirr)
+```
+
+# Model for Wirral
+Old model
+Wirr_model <- lm('Bike  ~ User_prop + Density + Slope + PublicTransp + IMD_Score + prop_green + prop_lane', model_wirr)
+summary(Wirr_model)
+
+```{r}
+#Final model
+#Create model for Wirral without station binary
+Wirr_model <- lm('log1p(Bike)~ pr_16.45+ Density + male_prop + IMD_Score + pr_nssec12 + per_nocars +perc_1car+ pr_km1.5+ pr_km5.10 + rain+Slope +  + PublicTransp + prop_green + prop_lane', model_wirr)
+summary(Wirr_model)
+```
+
+```{r}
+vif(Wirr_model)
+```
+
+```{r}
+
+gvlma ::gvlma(Wirr_model)
+```
+
+
+
+```{r}
+#FINAL MODEL
+#model bike log transformed
+wirr_log <- lm('log1p(Bike)  ~ User_prop + Density + Slope+ PublicTransp+ IMD_Score + prop_green + prop_lane', model_wirr)
+summary(wirr_log)
+```
+
+#### Checking for collinearity
+.
+```{r}
+vif(Wirr_model)
+```
+
+```{r}
+rownames(LSOA_model)
+```
+
+
+#### Create the model for the other boroughs
+```{r}
+#Subset LSOA_model for Halton, Knowsley, Sefton, St Helens
+model_boroughs <- subset(LSOA_model,layer=='Halton'|layer=='Knowsley'|layer=='Sefton'|layer=='StHelens')
+#model_boroughs <- LSOA_model[LSOA_model$layer == 'Halton',]+ [LSOA_model$layer == 'Knowsley',]+ [LSOA_model$layer == 'Sefton',]+[LSOA_model$layer == 'St Helens',]
+head(model_boroughs)
+```
+
+```{r}
+#Create the model
+#Create model for Wirral without station binary
+borough_model <- lm('Bike  ~ User_prop + User + Density_day + density_night + Slope + PublicTransp + Car+ IMD_Score + Lane + prop_green', model_boroughs)
+summary(borough_model)
+```
+
+```{r}
+vif(borough_model)
+```
+
