@@ -76,6 +76,8 @@ head(OD_LCR.t)
 (intra = OD_LCR %>% filter(LSOACD == LSOACD.1))
 ```
 
+### This section is about creating the black and white map for the cover of the dissertation.
+All these chunks of code are based on this post from James Cheshire and his amazing map on the book "London: the information capital". https://jcheshire.com/visualisation/mapping-flows/
 
 
 ```{r}
@@ -138,6 +140,7 @@ xquiet<- scale_x_continuous("", breaks=NULL)
 yquiet<-scale_y_continuous("", breaks=NULL)
 quiet<-list(xquiet, yquiet)
 ```
+
 
 ```{r}
 #Filter by excluding flows <10
