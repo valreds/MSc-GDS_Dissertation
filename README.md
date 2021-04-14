@@ -1,2 +1,4 @@
 # MSc-GDS_Dissertation
-Dissertation files
+This repository contains my R-dissertation files. 
+
+Further work: I need to comment each file and add comments on the contents of each one.
