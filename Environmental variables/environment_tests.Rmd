@@ -1,0 +1,366 @@
+Envorinmental variables
+
+```{r}
+getwd()
+```
+
+
+```{r}
+#install.packages("ncdf4")
+library(raster)
+library(ncdf4)
+#library(dplyr)
+```
+
+
+```{r}
+boundary <- shapefile("LCR_LSOAS.shp")
+rain <- nc_open("rainfall_hadukgrid_uk_1km_ann_201701-201712.nc")
+#st_crs(rain)
+#st_crs(boundary)
+```
+
+```{r}
+#create a text file with t he metadata
+{
+  sink('rainfall_hadukgrid_uk_1km_ann_201701-201712_metadata.txt')
+  print(rain)
+  sink()
+}
+```
+
+```{r}
+#get the list of the raster variable names
+attributes(rain$var)$names
+```
+
+```{r}
+#get units of variables
+ncatt_get(rain, attributes(rain$var)$names[1])
+```
+
+https://stackoverflow.com/questions/46207167/how-to-extract-from-a-nc-file-based-on-a-shapefile-in-r
+
+
+```{r}
+rain_matrix <- ncvar_get(rain, varid="rainfall") # extact value. In this case, 3 is for time step number 3
+rain_r <- raster(t(rain_matrix),xmn=-180, xmx=180, ymn=-90, ymx=90) # create a raster with data (it is flipped)
+rain_r <- flip(rain_r,2) # correct raster
+projection(rain_r) <- '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 ' # add CRS
+
+plot(rain_r) # check result
+```
+
+```{r}
+# reproject shapefile
+g <- st_transform(boundary, crs = st_crs(rain_r@crs))
+#g <- spTransform(boundary, rain_r@crs)
+# extract values by each feature
+rain_values <- extract(rain_r,g, fun=mean,na.rm=T, df=TRUE)
+#extrac and add as new column in shapefile
+#boundary$rain <- extract(rain_r, g, na.rm = TRUE)
+# extract mean by each feature
+#rain_mean <- extract(rain_r,g,fun=mean,na.rm=T, df=TRUE)
+rain_values <- as.data.frame(rain_values)
+#rain_mean$id <- seq.int(nrow(rain_mean))
+#rain_mean
+```
+
+rain_mean in the mean annual rain per LSOA
+
+
+```{r}
+#create an id column for LSOAs and join
+boundary$ID <- seq.int(nrow(boundary))
+rain_LSOA <-full_join(boundary, rain_mean, by="ID")
+#st_write(rain_LSOA, "rain_LSOA.shp", driver = "ESRI Shapefile")
+colnames(rain_LSOA)
+colnames(rain_LSOA) <- c("LSOA11CD", "spjoin_rif","ID_rain","Rain","id","geometry" )
+```
+
+
+#extract values for mean air temp
+```{r}
+#load raster
+mean <- nc_open("tas_hadukgrid_uk_1km_ann_201701-201712.nc")
+
+#get the list of the raster variable names
+attributes(mean$var)$names
+```
+
+```{r}
+#get units of variables
+ncatt_get(mean, attributes(max$var)$names[1])
+```
+
+```{r}
+# extract values
+# extract values
+mean_matrix <- ncvar_get(mean, varid="tas")
+# create a raster with data (it is flipped)
+mean_air <- raster(t(mean_matrix),xmn=-180, xmx=180, ymn=-90, ymx=90) 
+mean_air <- flip(mean_air,2) # correct raster
+# add CRS
+projection(mean_air) <- '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 ' 
+# check result
+plot(mean_air) 
+```
+
+```{r}
+# reproject shapefile
+g <- spTransform(boundary, mean_air@crs)
+#g <- st_transform(boundary, crs = st_crs(mean_air@crs))
+# extract values by each feature
+meanair_values <- extract(mean_air,g, fun=base::mean, na.rm=T, df=TRUE)
+#extrac and add as new column in shapefile
+#boundary$rain <- extract(rain_r, g, na.rm = TRUE)
+# extract mean by each feature
+#rain_mean <- extract(rain_r,g,fun=mean,na.rm=T, df=TRUE)
+meanair_values <- as.data.frame(meanair_values)
+#maxair_values$ID <- seq.int(nrow(minair_values))
+```
+
+
+```{r}
+library(dplyr)
+#create an id column for LSOAs and join
+boundary$ID <- seq.int(nrow(boundary))
+mean_LSOA <-merge(boundary, meanair_values, by="ID")
+#st_write(rain_LSOA, "rain_LSOA.shp", driver = "ESRI Shapefile")
+colnames(max_LSOA)
+colnames(max_LSOA) <- c("LSOA11CD", "spjoin_rif","ID","max","geometry" )
+```
+
+```{r}
+library(rgdal)
+library(sf)
+writeOGR(mean_LSOA, ".", "meanair_LSOA.shp", driver = "ESRI Shapefile")
+#st_write(mean_LSOA, "meanair_LSOA.shp", driver = "ESRI Shapefile")
+
+```
+
+
+#### Do the same for min air temp
+```{r}
+min <- nc_open("tasmin_hadukgrid_uk_1km_ann_201701-201712.nc")
+```
+
+```{r}
+#create a text file with t he metadata
+{
+  sink('tasmin_hadukgrid_uk_1km_ann_201701-201712.txt')
+  print(min)
+  sink()
+}
+```
+
+```{r}
+#get the list of the raster variable names
+attributes(min$var)$names
+```
+
+```{r}
+#get units of variables
+ncatt_get(min, attributes(min$var)$names[1])
+```
+
+```{r}
+# extract values
+min_matrix <- ncvar_get(min, varid="tasmin")
+# create a raster with data (it is flipped)
+min_air <- raster(t(min_matrix),xmn=-180, xmx=180, ymn=-90, ymx=90) 
+min_air <- flip(min_air,2) # correct raster
+# add CRS
+projection(min_air) <- '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 ' 
+# check result
+plot(min_air) 
+```
+
+```{r}
+# reproject shapefile
+g <- st_transform(boundary, crs = st_crs(min_air@crs))
+# extract values by each feature
+minair_values <- extract(min_air,g, fun=mean, na.rm=T, df=TRUE)
+#extrac and add as new column in shapefile
+#boundary$rain <- extract(rain_r, g, na.rm = TRUE)
+# extract mean by each feature
+#rain_mean <- extract(rain_r,g,fun=mean,na.rm=T, df=TRUE)
+minair_values <- as.data.frame(minair_values)
+#minair_values$ID <- seq.int(nrow(minair_values))
+```
+
+```{r}
+#create an id column for LSOAs and join
+boundary$ID <- seq.int(nrow(boundary))
+min_LSOA <-full_join(boundary, minair_values, by="id")
+#st_write(rain_LSOA, "rain_LSOA.shp", driver = "ESRI Shapefile")
+colnames(min_LSOA)
+colnames(min_LSOA) <- c("LSOA11CD", "spjoin_rif","ID","min","geometry" )
+```
+
+
+#extract values for max air
+```{r}
+#load raster
+max <- nc_open("tasmax_hadukgrid_uk_1km_ann_201701-201712.nc")
+
+#get the list of the raster variable names
+attributes(max$var)$names
+```
+
+```{r}
+#get units of variables
+ncatt_get(max, attributes(max$var)$names[1])
+```
+
+```{r}
+# extract values
+# extract values
+max_matrix <- ncvar_get(max, varid="tasmax")
+# create a raster with data (it is flipped)
+max_air <- raster(t(max_matrix),xmn=-180, xmx=180, ymn=-90, ymx=90) 
+max_air <- flip(max_air,2) # correct raster
+# add CRS
+projection(max_air) <- '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0 ' 
+# check result
+plot(max_air) 
+```
+
+```{r}
+# reproject shapefile
+g <- st_transform(boundary, crs = st_crs(min_air@crs))
+# extract values by each feature
+maxair_values <- extract(max_air,g, fun=mean, na.rm=T, df=TRUE)
+#extrac and add as new column in shapefile
+#boundary$rain <- extract(rain_r, g, na.rm = TRUE)
+# extract mean by each feature
+#rain_mean <- extract(rain_r,g,fun=mean,na.rm=T, df=TRUE)
+maxair_values <- as.data.frame(maxair_values)
+#maxair_values$ID <- seq.int(nrow(minair_values))
+```
+
+
+```{r}
+#create an id column for LSOAs and join
+boundary$ID <- seq.int(nrow(boundary))
+max_LSOA <-full_join(boundary, maxair_values, by="ID")
+#st_write(rain_LSOA, "rain_LSOA.shp", driver = "ESRI Shapefile")
+colnames(max_LSOA)
+colnames(max_LSOA) <- c("LSOA11CD", "spjoin_rif","ID","max","geometry" )
+```
+
+We have three LSOA shapefiles with rain, min and max. We need to join into one using LSOA codes 
+```{r}
+#join commute and LSOA shapefile
+#rain.min<- st_join(rain_LSOA, min_LSOA)
+#head(rain.min)
+#join rain and min
+rain.min <-full_join(rain_LSOA, min_LSOA, by="ID")
+```
+
+```{r}
+st_write(rain_LSOA, "rain_LSOA.shp", driver= "ESRI Shapefile")
+st_write(min_LSOA, "min_LSOA.shp", driver= "ESRI Shapefile")
+st_write(max_LSOA, "max_LSOA.shp", driver= "ESRI Shapefile")
+```
+
+
+
+
+https://stackoverflow.com/questions/22333473/how-do-i-extract-raster-values-from-polygon-data-then-join-into-spatial-data-fra
+
+e <- extract(r, p)
+ee <- data.frame(ID=p$Block_ID, e)
+```{r}
+# reproject shapefile from projected to WGS84
+#g <- st_transform(boundary, st_crs(rain_r@crs))
+#extract and add as new column in shapefile
+boundary$maxair <- extract(min_air, g, fun = mean, na.rm = TRUE)
+```
+
+```{r}
+library(rgdal)
+writeOGR(boundary, "env_variable.shp", driver= "ESRI Shapefile")
+```
+
+
+```{r}
+# reproject shapefile from projected to WGS84
+#g <- st_transform(boundary, st_crs(rain_r@crs))
+#extract and add as new column in shapefile
+boundary$minair <- extract(min_air, g, na.rm = TRUE)
+```
+
+
+# read the netcdf file as raster
+nc_raster = raster("input_file.nc")
+
+# if raster crs is NA, set the correct projection using proj4
+projection(nc_raster) = CRS(+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0)
+
+# save output
+writeRaster(nc_raster, "nc_raster.tif", "GTiff")
+
+
+
+```{r}
+#test load and save as tiff
+# read the netcdf file as raster
+nc_maxair = raster("tasmax_hadukgrid_uk_1km_ann_201701-201712.nc")
+
+# if raster crs is NA, set the correct projection using proj4
+projection(nc_maxair) <- '+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0'
+
+# save output
+writeRaster(nc_maxair, "tasmaxair.tif", "GTiff")
+
+#Load raster
+maxair <- raster("tasmaxair.tif")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+#this command is for normal rasters tiff not ncdf4
+test_max <- extract(max_air, boundary, df=TRUE) 
+```
+
+
+centroids = st_transform(centroids, st_crs(liv.shape))
+
+```{r}
+#reproject to osgb36
+maxtemp_pr = st_transform(maxtemp, st_crs(boundary))
+st_crs(maxtemp_pr)
+```
+
+```{r}
+st_write(maxtemp_pr, "maxtemp.shp", driver = "ESRI Shapefile")
+```
+
+```{r}
+plot(maxtemp_pr$geometry, axes=TRUE)
+plot(boundary$geometry, add=TRUE)
+```
+
