@@ -1,0 +1,948 @@
+
+```{r}
+#install.packages("stplanr")
+library(stplanr)
+library(dplyr)
+library(rgdal)
+library(sf)
+library(tidyverse)
+library(pct)
+library(tmap)
+#Saving  my API token to R environment
+mytoken = 'd6fee7f1acac5c7c'
+Sys.setenv(CYCLESTREET = mytoken)
+```
+
+```{r}
+getwd()
+```
+
+
+
+```{r}
+#Add LCR zone polygon with pct tool
+liv_shape <- pct_regions[pct_regions$region_name=="liverpool-city-region", ]
+plot(liv_shape)
+```
+
+
+```{r}
+#add LCR boundary
+#Add MSOA LCR centroids
+boundary <- st_read("LCR_Boundary.shp")
+boundary = st_transform(boundary, st_crs(liv_shape))
+#LCR_cent$lsoa11cd <- as.character(LCR_cent$lsoa11cd)
+plot(boundary$geometry)
+#head(boundary)
+```
+
+```{r}
+#Extract some data
+od = stplanr::od_data_sample
+class(od)
+od
+```
+
+```{r}
+getwd()
+```
+
+```{r}
+rm (list=ls( ))
+```
+
+```{r}
+#Load Od table
+OD_LCR <- read.csv("LCR_LSOA_OD.csv")
+OD_LCR <- OD_LCR[,c(2,4,5)]
+names(OD_LCR) <- c("origin", "destination", "trips")
+head(OD_LCR)
+```
+
+```{r}
+#Convert to tibble
+OD_LCR.t <- as_tibble(OD_LCR)
+head(OD_LCR.t)
+#convert to character
+#OD_LCR$LSOACD <- as.character(OD_LCR$LSOACD)
+#OD_LCR$LSOACD.1 <- as.character(OD_LCR$LSOACD.1)
+#head(OD_LCR)
+```
+
+
+```{r}
+#inter zones, regional total flows
+(inter = OD_LCR %>% filter(LSOACD != LSOACD.1))
+(intra = OD_LCR %>% filter(LSOACD == LSOACD.1))
+```
+
+
+
+```{r}
+#Add MSOA LCR centroids
+LCR_cent <- st_read("LCR_weigthted_centroids.shp")
+LCR_cent = st_transform(LCR_cent, st_crs(liv_shape))
+head(LCR_cent)
+LCR_cent$lsoa11cd <- as.character(LCR_cent$lsoa11cd)
+plot(LCR_cent$geometry)
+```
+
+
+```{r}
+#add LSOA centroids all
+#cent_LSOA <- st_read("Lower_Layer_Super_Output_Areas_December_2011_Population_Weighted_Centroids.shp")
+#Project
+cent_LSOA = st_transform(LCR_cent, st_crs(liv_shape))
+#Transform code from factor to character
+#cent_LSOA$lsoa11cd <- as.character(cent_LSOA$lsoa11cd)
+#Plot geometry
+plot(liv_shape)
+plot(cent_LSOA$geometry)
+```
+
+```{r}
+#Clip centroids to Liv shape
+cents_LSOA.liv <- cent_LSOA[liv_shape, ]
+#Transform code from factor to character
+cents_LSOA.liv$lsoa11cd <- as.character(cents_l$lsoa11cd)
+plot(cents_LSOA.liv$geometry)
+```
+
+```{r}
+#write.csv(cents_LSOA.liv, file="centroids_LSOA_LCR.csv")
+cents.lsoa <- read.csv("centroids_LSOA_LCR.csv")
+cents.lsoa$lsoa11cd <- as.character(cents.lsoa$lsoa11cd)
+lapply(cents.lsoa, class)
+```
+
+```{r}
+#Join centroid to od table
+#merge origin xy coords
+or_xy <- merge(OD_LCR, cents.lsoa, by.x="origin", by.y="lsoa11cd")
+#change column names
+names(or_xy) <- c("Origin", "Destination", "trips", "oX", "oY")
+#merge destination xy cords
+dest.xy <- merge(or_xy, cents.lsoa, by.x="Destination", by.y="lsoa11cd")
+#change names
+names(dest.xy) <- c("Origin", "Destination", "trips", "oX", "oY", "dX", "dY" )
+```
+
+
+```{r}
+head(dest.xy)
+```
+
+```{r}
+#Remove axes
+xquiet<- scale_x_continuous("", breaks=NULL)
+yquiet<-scale_y_continuous("", breaks=NULL)
+quiet<-list(xquiet, yquiet)
+```
+
+```{r}
+#Filter by excluding flows <10
+map <- ggplot(dest.xy[which(dest.xy$trips>10),], aes(oX, oY))+
+#The next line tells ggplot that we wish to plot line segments. The "alpha=" is line transparency and used below 
+geom_segment(aes(x=oX, y=oY,xend=dX, yend=dY, alpha=trips), col="white",breaks= c(10,50,100,150))+
+#Here is the magic bit that sets line transparency - essential to make the plot readable
+scale_alpha_continuous(range = c(0.03, 0.3))+
+theme(panel.background = element_rect(fill = 'black', colour='black'))+quiet+coord_equal()
+map
+```
+
+```{r}
+ggsave("map_LCR.png", plot = map, width = 15, height = 15, dpi = "screen")
+```
+
+
+```{r}
+#This is the method to travel to work by LSOA for the LCR
+OD_LCR.method <- get_pct_zones(region = "liverpool-city-region", geography = "msoa", extension = ".Rds")
+```
+
+```{r}
+head(OD_LCR.method)
+```
+
+
+```{r}
+#Step 1
+# Load OD table for all UK
+OD_UK <- pct::get_od()
+#load MSOA centroids
+centroids <- get_centroids_ew()
+#set the same coordinates system
+centroids = st_transform(centroids, st_crs(liv_shape))
+#clip centroids for LCR
+centroids.lcr <- centroids[liv_shape, ]
+#filter flows within the lcr from the od uk
+#od.LCR <- OD_UK %>%
+#  filter(geo_code1 %in% centroids.lcr$msoa11cd)%>%
+#  filter(geo_code2 %in% centroids.lcr$msoa11cd)
+#subset flows with origin and destination within the LCR
+od.LCR = OD_UK[
+  OD_UK$geo_code1 %in% centroids.lcr$msoa11cd &
+  OD_UK$geo_code2 %in% centroids.lcr$msoa11cd , 
+]
+```
+
+Od_uk is the table with origin and destination per method of travel to work for the whole UK
+
+```{r}
+write.csv(centroids.lcr, file = "centroids_MSOA.csv" )
+head(centroids.lcr)
+```
+
+```{r}
+#convert from long to matrix
+#MSOA_matrix <- od_to_odmatrix(lines.inter[1:3])
+#write.csv(MSOA_matrix, file = "MSOA_matrix.csv")
+```
+
+In total, we have 26,774 trajectories. We first select inter regional 
+```{r}
+summary(od.LCR)
+```
+
+If we dont create the lines from od data, we could use the pct tools to extract the lines already. We need to compare the total number of lines when using pct_get_lines. This function gets the lines from the pct with all attributes
+
+```{r}
+lcr_odlines <- get_pct_lines(region = "liverpool-city-region", geography = "msoa")
+nrow(lcr_odlines)
+plot(lcr_odlines$geometry)
+```
+
+Continue using stplanr, create lines inter
+
+```{r}
+#Step 2
+#create desire lines for LCR
+lines.lcr <- od2line(od.LCR, centroids.lcr)
+nrow(lines.lcr)
+#create inter regional flows
+lines.inter <- lines.lcr %>% filter(geo_code1 != geo_code2)
+#create intra regional
+lines.intra <- lines.lcr %>% filter(geo_code1 == geo_code2)
+```
+Total 26774
+Inter region 26574
+Intra MSOA 200
+
+```{r}
+#Save file
+write.csv(lines.inter, file="lines_inter.csv")
+```
+
+
+```{r}
+#Step 3
+#To avoid plotting 26000 lines we need to subset
+#select top all flows the mean is 17 and min is 1 max is 965
+#select a new threshold for all 
+trips_all_min <- 50
+#Select all flows according to the minimum set
+lines.top <- lines.inter %>% filter (all >= trips_all_min)
+#select both inter and intra regional with the minimum set
+#top.intra.inter <- lines.lcr %>% filter(all>= 30)
+nrow(lines.top)
+nrow(lines.lcr)
+
+
+
+#create top all commutes
+# 1 commute = total 2205 trips
+#2 commutes =  782
+#Set a threshold bof cycling
+#bike.min <- 3
+#bikes.top <- lines.inter %>% filter (bicycle >= bike.min)
+```
+
+By creating the trips min to 50, check how representative it is.
+```{r}
+#calculate the proportion covered by the top lines
+nrow(lines.top)/ nrow(lines.lcr)
+#calculate sum of total commmutes by each dataset
+sum(lines.top$all) / sum(lines.lcr$all)
+```
+7% of the top inter intra flows cover 50% of all flows
+
+```{r}
+#calculate the proportion covered by the top lines
+nrow(lines.top)/ nrow(lines.lcr)
+#calculate sum of total commmutes by each dataset
+sum(lines.top$all) / sum(lines.lcr$all)
+```
+12% of the top lines conver 60% of the total flows within the region.
+
+```{r}
+nrow(lines.top)
+nrow(lines.lcr)
+```
+
+
+```{r}
+summary(lines.top$bicycle)
+```
+
+
+```{r}
+#plot inter regional flows
+lwd = lines.top$all / mean(lines.top$all)/10
+#create a percentage active
+#lines.lcr$percent.active <- (lines.lcr$bicycle+lines.lcr$foot) / lines.lcr$all *100
+#create percent that does not drive
+lines.top$no_drive <- 100 - (lines.top$car_driver) / lines.top$all *100
+#create percent not drive in the overall lines file
+lines.lcr$no_drive <- (lines.lcr$car_driver) / lines.lcr$all *100
+#create a percentage cycle
+#lines.lcr$percent.cycle <- (lines.lcr$bicycle/ lines.lcr$all) *100
+#plot the map
+plot(lines.top["no_drive"], lwd = lwd)
+```
+
+```{r}
+#summary(lines.top$no_drive)
+head(lines.top)
+```
+
+```{r}
+#plot all inter regional flows. Select most representative
+lines.top = lines.top %>% 
+  arrange(all) 
+tm_shape(liv_shape) + tm_borders() +
+  tm_shape(lines.top) +
+  tm_lines(palette = "viridis", style = "quantile", n = 5,
+    lwd = "all",
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "all",
+    title = "Total flows",
+    legend.lwd.show = FALSE) +
+  tm_scale_bar(width = 0.08,lwd= 0.3, 
+               position = c("left", "bottom")) +
+  tm_layout(
+    legend.title.size = 1,
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    #legend.position = c("right", "top"),
+    #legend.height = 0.5,
+    legend.text.size = 0.6,
+    legend.stack="vertical",
+    #bg.color = "grey85",
+    frame = TRUE,
+    frame.lwd = 0.5,
+    legend.show = TRUE,
+    legend.width = 1
+    )
+```
+
+```{r}
+summary(top.intra.inter$all)
+```
+
+```{r}
+nrow(top.intra.inter)
+```
+
+
+```{r}
+#plot no drive both intra and inter regional flows
+no_drive.inter <- tm_shape(liv_shape) + tm_borders() +
+  tm_shape(top.intra.inter) +
+  tm_lines(palette = "-viridis", style = "pretty", n = 5,
+    lwd = "all",
+    scale = 7,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "no_drive",
+    title = "No car flows (%)",
+    legend.lwd.show = TRUE) +
+  tm_scale_bar(size = 0.3, width = 0.15,lwd= 0.3,
+               position = c("left", "bottom")) +
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(
+    legend.title.size = 0.6,
+    legend.bg.alpha = 0.8,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.height = 0.5,
+    legend.text.size = 0.5,
+    legend.stack="vertical",
+    frame = TRUE,
+    frame.lwd = 0.5,
+    legend.width = 1)
+no_drive.inter
+```
+
+```{r}
+lines.top$id <- paste(lines.top$geo_code1, lines.top$geo_code2, sep= " ")
+```
+
+#this line creates the routes for the top 5 rows of the data
+street_lines <- line2route(lines_lcr[1:5, ], plan="quietest")
+
+```{r}
+#create cycling network
+route_net <- SpatialLinesNetwork(rnet)
+nodes_df <- data.frame(
+    start = rep(c(1, 2, 3, 4, 5), each = 4),
+    end = rep(c(50, 51, 52, 33), times = 100)
+  )
+rnet_bike_links <- sum_network_links(route_net, nodes_df)
+plot(rnet_bike_links$geometry, col="red", lwd = 4, axes=TRUE)
+plot(liv_shape$geometry, add=TRUE)
+```
+
+
+
+```{r}
+#create cycle network
+route_net <- SpatialLinesNetwork(rnet)
+rnet_bike <- sum_network_routes(route_net, start = 1, end = 1500, sumvars = "length")
+plot(rnet_bike, col="red", lwd = 4)
+plot(route_net)
+```
+
+```{r}
+head(route_net)
+```
+
+
+```{r}
+#create street level lines from lines.top
+route_lines <- line2route(lines.top[1:10, ], route_fun = route_osrm)
+plot(liv_shape$geometry, axes=TRUE)
+plot(route_lines$geometry, add= TRUE)
+```
+
+
+```{r}
+tmap_save(no_drive.inter, filename = "no_drive_both.jpeg")
+```
+
+
+```{r}
+nrow(lines.top)
+```
+
+  tm_borders(col = "grey", lwd = 0.3) + 
+  tm_scale_bar(size = 0.3, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+```{r}
+#plot flows not by car
+#lines.top = lines.top %>% 
+ # arrange(no_drive) 
+no_drive <- tm_shape(liv_shape) + tm_borders() +
+  tm_shape(lines.top) +
+  tm_lines(palette = "viridis", style = "pretty", n = 5,
+    lwd = "all",
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "no_drive",
+    title = "No car flows (%)",
+    legend.lwd.show = TRUE) +
+  tm_scale_bar(size = 0.3, width = 0.15,lwd= 0.3,
+               position = c("left", "bottom")) +
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(
+    legend.title.size = 0.6,
+    legend.bg.alpha = 0.8,
+    legend.bg.color = "white",
+    #legend.position = c("right", "top"),
+    #legend.height = 0.5,
+    legend.text.size = 0.5,
+    legend.stack="vertical",
+    frame = TRUE,
+    frame.lwd = 0.5,
+    legend.show = TRUE,
+    legend.width = 1)
+no_drive
+```
+
+```{r}
+  tmap_save(no_drive, filename = "noDrive_map.jpg")
+```
+
+
+
+```{r}
+#Create same map but for car passenger and driver
+#plot inter regional flows
+lwd = lines.top$all / mean(lines.top$all)/10
+#create a percentage car drivers
+lines.top$driving<- 100 - (lines.top$car_driver+lines.top$car_passenger) / lines.top$all *100
+#plot the map
+plot(lines.top["driving"], lwd = lwd)
+```
+
+Exmaples 
+```{r}
+#tmap for commutes by car
+lines.top = lines.top %>% 
+  arrange(driving) 
+tm_shape(liv_shape) + tm_borders() +
+  tm_shape(lines.top) +
+  tm_lines(palette = "plasma", style = "equal",
+    lwd = "all",
+    scale = 9,
+    n=5,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "driving",
+    title = "Car flows (%)",
+    legend.lwd.show = TRUE,
+    legend.lwd.is.portrait = TRUE
+  ) +
+  tm_scale_bar() +
+  tm_layout(
+    legend.title.size = 1.5,
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.text.size = 0.8,
+    legend.width=1.5,
+    legend.stack="horizontal",
+    legend.position = c("right", "top"))
+  #tm_legend(outside=FALSE, stack="horizontal")
+```
+
+
+```{r}
+#plot inter regional flows
+lwd = lines.top$all / mean(lines.top$all)/10
+#create a percentage active
+#lines.lcr$percent.active <- (lines.lcr$bicycle+lines.lcr$foot) / lines.lcr$all *100
+#create percent that does not drive
+lines.top$no_drive <- 100 - (lines.top$car_driver) / lines.top$all *100
+#create a percentage cycle
+#lines.lcr$percent.cycle <- (lines.lcr$bicycle/ lines.lcr$all) *100
+#plot the map
+plot(lines.top["no_drive"], lwd = lwd, breaks= c(0,50,70,100,150,200))
+```
+
+```{r}
+lines.inter$dist_bike <- st_length(lines.inter$bicycle)
+```
+
+
+## With this same dataset (lines.inter), create the map for top cycling flows
+
+```{r}
+summary(lines.inter$bicycle)
+```
+
+summaries
+All flows mean 15.91, max 722
+Bicycle 0.37, max 47
+Car mean 9.257 max 451
+Total LCR flows all 26775
+
+
+```{r}
+#Step 4= for all flows
+#To avoid plotting 26000 lines we need to subset by bicycle
+#select top all flows the mean is .37 and min is 0 max is 47
+#select a new threshold for bicycle
+trips_all_min <- 50
+#Select all flows according to the minimum set
+lines.top <- lines.inter %>% filter (all >= trips_all_min)
+#select both inter and intra regional with the minimum set
+#top.intra.inter <- lines.lcr %>% filter(all>= 30)
+nrow(lines.top)
+nrow(lines.lcr)
+```
+
+```{r}
+nrow(lines.inter)
+```
+
+
+```{r}
+#Step 4 = for bike flows
+#To avoid plotting 26000 lines we need to subset by bicycle
+#select top all flows the mean is .37 and min is 0 max is 47
+#select a new threshold for bicycle
+bike_min <- 3
+#define minimum trips for inter flows
+bike.top <- lines.inter %>% filter (bicycle >= bike_min)
+nrow(bike.top)
+#define minimum trips for all flows
+#bike.top.all  <- lines.lcr %>% filter (bicycle >= bike_min)
+
+#Create a new threshold for 20 trips min
+bike_20 <- lines.inter %>% filter (bicycle >= 15)
+nrow(bike_20)
+plot(bike_20$geometry)
+#create top all commutes
+#trips.all.min <- 20
+#lines.all.top <- lines.inter %>% filter (all >= trips.all.min)
+```
+
+
+```{r}
+#check representativeness
+nrow(bike.top) / nrow(lines.lcr)
+sum(bike.top$all)/sum(lines.lcr$all)
+```
+3.7% of the bike top lines contain 29% of the total number of trips.
+
+```{r}
+#plot inter regional flows for bicycle
+lwd = lines.inter$all / mean(lines.inter$all)/10
+#create not driving flows
+#create a percentage of cycling
+bike.top$p_cycle <- bike.top$bicycle / bike.top$all *100
+#create percent that does not drive
+#lines.inter$percent.active <- 100 - (lines.inter$bicycle+lines.lcr$foot) / lines.inter$all *100
+#create a percentage cycle
+#lines.lcr$percent.cycle <- (lines.lcr$bicycle/ lines.lcr$all) *100
+#plot the map
+#Define line width for bike
+lwd_bk = bike.top$all / mean(bike.top$all)
+plot(bike.top["bicycle"], lwd = lwd)
+```
+
+  tm_borders(col = "grey", lwd = 0.3) + 
+  tm_scale_bar(size = 0.3, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+
+https://docs.ropensci.org/stplanr/articles/stplanr-od.html
+https://github.com/Robinlovelace/geocompr/blob/master/code/12-desire.R
+
+  tm_scale_bar(size = 0.3, width = 0.15,lwd= 0.3,
+               position = c("left", "bottom")) +
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+
+```{r}
+lapply(bike.top, class)
+```
+
+
+```{r}
+#calculate distance of top bikes 
+bike.top$distance <- st_length(bike.top$bicycle)
+summary(bike.top$bicycle)
+```
+
+
+```{r}
+#Step 5
+#plot with tmap top bike trajectories with min 3 trips
+#tmap_mode("plot")
+#bike.top = bike.top.all %>% 
+#  arrange(bicycle) 
+bike_all <- tm_shape(boundary) + tm_borders() + tm_fill("grey86")+
+  tm_shape(bike.top) +
+  tm_lines(palette = "plasma", breaks = c(3, 10, 20, 40, 50),
+    lwd = "bicycle",
+    #n=5,
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.9,
+    col = "bicycle",
+    title = "Commutes by cycle",
+    legend.lwd.show = FALSE) +
+  tm_scale_bar(size=.5, width = 0.15,lwd= 0.3,
+               position = c("left", "bottom"))+
+   tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.6,
+    legend.stack="vertical")
+bike_all
+```
+
+```{r}
+tmap_save(bike_all, filename = "bike_all_flows_inv.jpeg", )
+```
+
+
+```{r}
+summary(lines.inter$bicycle)
+```
+
+Using the same data, bike.top, create the street level network
+```{r}
+#Step 6 convert OD lines to street level lines
+bikes_net <- line2route(bike.top, route_fun = route_cyclestreet)
+bikes_net_quiet <- line2route(bike.top, plan = "quietest")
+bike_balance <- line2route(bike.top, plan= "balanced")
+plot(bikes_net_quiet$geometry)
+```
+
+the created network need to be joined to the bike.top. First, create an id column for bike.top
+```{r}
+#create id to join
+bike.top <- bike.top %>% 
+  mutate(id = row_number())
+head(bike.top)
+```
+
+```{r}
+#save as table drop geometry
+#subset data keep table only no geo
+bike_nogeo <- bike.top %>%
+  st_drop_geometry() %>%
+  select(id,geo_code1, geo_code2, all, bicycle)
+bikes_net <- bikes_net %>%
+  select(id)
+#create for quiet routes
+bikes_net_quiet <- bikes_net_quiet%>%
+  select(id)
+#create for balanced routes
+bike_balance <- bike_balance %>%
+  select(id)
+```
+
+```{r}
+#join with the bikes_net
+#dont know where this came from
+#join data
+#routes_commute = left_join(routes_commute, lines_commute)
+#plot(routes_commute["bicycle"])
+bike_network_all <- left_join(bikes_net, bike_nogeo)
+plot(bike_network_all$geometry)
+#try for quiet routes
+bike_all_quiet <- left_join(bikes_net_quiet, bike_nogeo)
+plot(bike_all_quiet$geometry)
+#join for balanced routes
+bike_balancenet <- left_join(bike_balance, bike_nogeo)
+plot(bike_balancenet$geometry)
+```
+
+
+```{r}
+#step 7
+#create route network
+#Route summarized with overline
+#this results in a shape without any data, just lines
+bikes_routesnet <- overline2(x = bike_network_all, "bicycle")
+#create netowrk for quiet
+bikes_routesquiet <- overline2(x= bike_all_quiet, "bicycle")
+#create network for balanced
+bikes_routesbalan <- overline2(x= bike_balancenet, "bicycle")
+#plot
+tm_shape(liv.shape)+tm_polygons()+
+  tm_shape(bikes_routesbalan)+tm_lines(lwd = "bicycle", scale = 9, col = "bicycle" )
+```
+
+```{r}
+summary(bikes_routesnet$bicycle)
+summary(bikes_routesbalan$bicycle)
+```
+
+
+```{r}
+#step 8
+#create the same visualization as the OD map
+#plot with tmap top bike trajectories with min 3 trips
+bike_route <- tm_shape(boundary) + tm_borders() + tm_fill("grey86")+
+  tm_shape(bikes_routesbalan) +
+  tm_lines(palette = "plasma", breaks = c(3,15,30,50,100, 400),
+    lwd = "bicycle",
+    n=5,
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.9,
+    col = "bicycle",
+    title = "Commutes by cycle",
+    legend.lwd.show = FALSE) +
+  tm_scale_bar(size=.5, width = 0.15,lwd= 0.3,
+               position = c("left", "bottom"))+
+   tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.5,
+    legend.stack="vertical")
+bike_route
+```
+
+```{r}
+tmap_save(bike_route, "route_cycle.jpeg")
+```
+
+
+```{r}
+#Step 9
+#project
+bikes_rnet_pr = st_transform(bikes_routesnet, st_crs(boundary))
+#project quiet routes
+bikes_routes_quietpr = st_transform(bikes_routesquiet, st_crs(boundary))
+#project balanced routes
+bikes_balnetproj <- st_transform(bikes_routesbalan, st_crs(boundary))
+#export 
+st_write(bikes_balnetproj, "bike_top_balance.shp", driver =  "ESRI Shapefile")
+```
+
+###How to select where cycling commutes are promminent but that are not covered by cycling infrastructure
+
+```{r}
+#Step 10
+#load cycling infrastructure
+cycle <- st_read("cycle_all_proj.shp")
+#calculate routes covered by cycle lanes
+#diff <- st_sym_difference(cycle, bikes_balnetproj)
+```
+
+### create a regional map of flows
+```{r}
+summary(lines.inter$all)
+nrow(lines.inter)
+```
+
+```{r}
+#select top all flows the mean is 15.9 and max is 722
+#define minimum trips for inter flows
+top.all <- lines.inter %>% filter (all >= 100)
+nrow(top.all)
+```
+
+```{r}
+summary(top.all$all)
+```
+
+
+```{r}
+#lwd = top.all$all / mean(top.$all)/10
+#Create visualization
+tm_shape(liv_shape)+tm_borders()+tm_fill()+
+  tm_shape(top.all)+
+  tm_lines(palette = "viridis", breaks = c(100,200,350,500,750),
+    lwd = "all",
+    scale = 8,
+    title.lwd = "Number of trips",
+    alpha = 0.9,
+    col = "all",
+    title = "Total commutes",
+    legend.lwd.show = FALSE)+
+    tm_scale_bar(size=.4, width = 0.15, position = c("left", "bottom")) +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.5,
+    legend.stack="horizontal")
+```
+
+```{r}
+#Read boundary
+boundary <- st_read("LCR_Boundary.shp")
+```
+
+
+```{r}
+#Step 9
+#re project
+top.all.proj = st_transform(top.all, st_crs(boundary))
+st_crs(top.all.proj)
+ 
+st_write(top.all.proj, "top_all.shp", driver =  "ESRI Shapefile")
+```
+
+
+```{r}
+#make one map with all flows smaller than 5
+#select top bicycle flows the mean is 37 and max is 47
+#define minimum trips
+bike.min <- lines.inter %>% filter (bicycle <= 5  )
+nrow(bike.min)
+#nrow(lines.lcr)
+```
+
+```{r}
+#Create map wth flows smaller than 5 trips. COmpletelet 
+bike.min = bike.min %>% 
+  arrange(bicycle) 
+tm_shape(boundary) + tm_borders() +
+  tm_shape(bike.top) +
+  tm_lines(palette = "plasma", breaks = c(5, 10, 20, 40,50),
+    lwd = "all",
+    n=5,
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "bicycle",
+    title = "Commutes by cycle",
+    legend.lwd.show = TRUE) +
+  tm_scale_bar(size=.4) +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.6,
+    legend.stack="horizontal")
+```
+
+
+tm_layout(
+    legend.title.size = 1.5,
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.text.size = 0.8,
+    legend.width=1.5,
+    legend.stack="horizontal",
+    legend.position = c("right", "top"))
+
+```{r}
+#Find commutes with trips less than 5
+#select lowest bicycle flows the mean is 37 and max is 47
+#define minimum trips for all flows
+# <- lines.inter %>% filter (bicycle >= 2 & bicycle <= 4) %>%
+#  count(bicycle)
+#Define and count trips 1
+min_trips <- lines.inter %>% filter (bicycle <= 2) %>%
+  count(bicycle)
+#Define trips bigger than 5
+#min_trips <- lines.inter %>% filter (bicycle >= 5)
+```
+
+Total trips per trajectory for inter regional flows
+2 trips = 782 flows
+3 trips = 346 flows
+4 trips = 178
+
+```{r}
+#all commutes minimum 5 trips
+#plot with tmap
+#tmap_mode("plot")
+#min_trips = min_trips %>% 
+ # arrange(bicycle)
+tm_shape(boundary) + tm_borders() + tm_fill()+
+  tm_shape(min_trips) +
+  tm_lines(palette = "plasma", breaks = c(0,2,3,4,5),
+    #lwd = "bicycle",
+    #scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "bicycle",
+    title = "Total comutes",
+    legend.lwd.show = FALSE
+  ) +
+  tm_scale_bar() +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white"
+    )
+```
+
+```{r}
+#plot of flows not made by car includes public transport, cycle, foot
+#public transport is bus, rail, train, tram
+#car includes passenger and driving?
+
+```
+
+#calculate distance for bike trips
+
+```{r}
+#calculate distance for cycle commutes
+top300.car$Distance <-   st_length(top300.car)
+top300.cycle$Distance <- st_length(top300.cycle)
+```

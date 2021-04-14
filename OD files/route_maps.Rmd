@@ -1,0 +1,494 @@
+
+```{r}
+#install.packages("stplanr")
+library(stplanr)
+library(dplyr)
+library(rgdal)
+library(sf)
+library(tidyverse)
+library(pct)
+library(tmap)
+library(sp)
+library(tmap)
+library(ggplot2)
+```
+
+```{r}
+rm (list=ls( ))
+getwd()
+```
+
+
+```{r}
+#Saving  my API token to R environment
+mytoken = 'd6fee7f1acac5c7c'
+Sys.setenv(CYCLESTREET = mytoken)
+```
+
+```{r}
+#Load liv shape
+boundary <- st_read("LCR_Boundary.shp")
+```
+
+
+```{r}
+#How was the pct created. First, load centroids, area and OD pairs
+#get centroids
+centroids <- get_centroids_ew()
+plot(centroids$geometry)
+#load lcr shape
+liv.shape <- pct_regions[pct_regions$region_name=="liverpool-city-region", ]
+plot(liv.shape)
+#plot a map
+tm_shape(liv.shape)+tm_polygons()
+#load centroids from region set crs
+centroids = st_transform(centroids, st_crs(liv.shape))
+#clip centroids of all EW using the LCR shape
+centroids.lcr = centroids[liv.shape, ]
+plot(centroids.lcr$geometry)
+#get od data is the method to travel to work data
+od = get_od(region = "liverpool-city-region")
+#select od from LCR
+od_liv = od[od$geo_code1 %in% centroids.lcr$msoa11cd, ]
+head(od_liv)
+#filter by destination in england and wales
+#od_lcr_ew = od_liv[od_liv$geo_code2 %in% centroids$msoa11cd, ]
+#filter by origin and destination in LCR
+od_lcr = od_liv[od_liv$geo_code2 %in% centroids.lcr$msoa11cd, ]
+#select top 50 od pairs
+#od_lcr_top50 = od_lcr_ew %%
+#  filter(all > 50)
+#create od lines or desire lines- straight lines
+lines_lcr = od2line(od_lcr, centroids)
+plot(lines_lcr$geometry)
+#street level lines with route quietest
+street_lines <- line2route(lines_lcr[1:5, ], plan="quietest")
+plot(street_lines$geometry)
+```
+
+```{r}
+#calculate the distance of all trips in the LCR
+#lines_lcr$Distance <- st_length(lines_lcr$geometry)
+head(lines_lcr)
+```
+
+
+```{r}
+?route_cyclestreet
+```
+
+
+
+#finish https://itsleeds.github.io/pct/articles/pct_training.html#test-code
+#top 300 by car
+
+#Top_n funtion help
+#https://luisdva.github.io/rstats/Top-and-bottom-values-for-groups/
+
+```{r}
+#MSOA for inter regional commutes
+#get data by MSOA
+msoa <- get_pct_zones(region="liverpool-city-region", geography = "msoa")
+#get lines by MSOA
+lines_msoa <- get_pct_lines(region="liverpool-city-region", geography = "msoa")
+plot(lines_msoa$geometry)
+#select top 10 lines by bike
+top10_bike_msoa <- lines_msoa%>% top_n(100, bicycle)
+#plot maps
+plot(msoa$geometry, axes=TRUE)
+plot(top10_bike_msoa, add=TRUE, col = "red")
+#select top 300 bike
+top300.cycle <- lines_msoa%>% top_n(300,bicycle)
+#select 300 top car
+top300.car <- lines_msoa%>% top_n(300, car_driver)
+#plot
+plot(msoa$geometry, axes=TRUE)
+plot(top300.cycle, add=TRUE, col = "red", lwd=top300.cycle$bicycle/ 
+      mean(top300.cycle$bicycle))
+```
+
+```{r}
+#plot cycling and car lines
+plot(liv.shape$geometry, axes=TRUE)
+plot(top300.cycle$geometry, add=TRUE, col="green")
+plot(top300.car$geometry, add=TRUE, col="red")
+```
+
+We need to create inter regional flows too to run this lines
+```{r}
+#create desire lines for LCR
+lines_lcr = od2line(od_lcr, centroids)
+nrow(lines_lcr)
+#create inter regional flows
+lines.inter <- lines_lcr %>% filter(geo_code1 != geo_code2)
+nrow(lines.inter)
+#create intra regional
+lines.intra <- lines_lcr %>% filter(geo_code1 == geo_code2)
+```
+
+```{r}
+plot(lines.inter$geometry)
+```
+
+
+```{r}
+#Calculate distance for all inter regional flows
+lines.inter$Distance1 <- st_length(lines.inter$geometry)
+#change to number 
+lines.inter$Distance1 <- as.numeric(lines.inter$Distance1)
+#Change to km
+lines.inter$Distkm <- lines.inter$Distance1/1000
+#lines.inter$Distance2 <- st_length(lines.inter)
+head(lines.inter)
+```
+
+```{r}
+summary(lines.inter$bicycle)
+```
+
+
+```{r}
+#save shape for inter regional commutes
+st_write(lines.inter, "lines_inter.shp", driver= "ESRI Shapefile")
+```
+
+```{r}
+plot(lines_msoa$geometry)
+```
+
+```{r}
+#Calculate distance for all inter regional flows
+lines_msoa$Distance1 <- st_length(lines_msoa$geometry)
+#change to number 
+lines_msoa$Distance1 <- as.numeric(lines_msoa$Distance1)
+#Change to km
+lines_msoa$Distkm <- lines_msoa$Distance1/1000
+#lines.inter$Distance2 <- st_length(lines.inter)
+#subset file
+lines_msoa <- lines_msoa[,c(1:3,10:13,88:90)]
+head(lines_msoa)
+```
+
+```{r}
+st_write(lines_msoa, "lines_msoa2.shp", driver="ESRI Shapefile")
+```
+
+
+```{r}
+#select top bicycle flows the mean is 37 and max is 47
+bike_min <- 3
+#define minimum trips for inter flows
+bike.top <- lines_msoa %>% filter (bicycle >= bike_min)
+nrow(bike.top)
+nrow(lines_msoa)
+summary(bike.top$bicycle)
+#define minimum trips for all flows
+#bike.top.all  <- lines.lcr %>% filter (bicycle >= bike_min)
+```
+
+```{r}
+tm_shape(boundary)+tm_borders()+tm_fill()+
+  tm_shape(bike.top)+
+  tm_lines(palette = "plasma", breaks = c(3,10,15, 20, 50),
+    lwd = "bicycle",
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.9,
+    col = "bicycle",
+    title = "Commutes by cycle",
+    legend.lwd.show = FALSE)+
+    tm_scale_bar(size=.4, width = 0.15, position = c("left", "bottom")) +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.5,
+    legend.stack="horizontal")
+```
+
+
+
+```{r}
+#subset bike top
+bike_top <- bike.top[,c(1:3,10:18)]
+```
+
+```{r}
+#calculate distance of commute by bike
+#top300.car$Distance <-   st_length(top300.car)
+bike_top$Distance <- st_length(bike_top)
+head(bike_top)
+```
+
+```{r}
+#change data type units of cycle lane length to numeric (from units with m suffix)
+bike_top$Distance <- as.numeric(bike_top$Distance)
+bike_top$Distance <- bike_top$Distance/1000
+head(bike_top)
+```
+
+```{r}
+st_write(bike_top, "bike-distance.shp", driver="ESRI Shapefile")
+```
+
+```{r}
+summary(bike_top$Distance)
+```
+
+
+#Plot trips and distance
+```{r}
+ggplot(data=bike_top)+
+geom_line(aes(x=Distance, y=bicycle), color="cyan")+
+  labs(x= "Distance (km)", y= "Bicycle trips")+
+  theme_dark()
+```
+
+
+lines_msoa is the complete file
+```{r}
+#add percentage to cycle by MSOA
+bike_top$pcycle <- (bike_top$bicycle / bike_top$all) * 100
+plot(bike_top["pcycle"], lwd = bike_top$all/mean(bike_top$all), breaks=c(0,5,10,20,30,40,50))
+```
+
+Modifying PCT data to identify routes/roads of interest
+Exercises from PCT workshop
+```{r}
+#download route network
+network <- get_pct_rnet(region = "liverpool-city-region", geography = "msoa")
+plot(liv.shape$geometry, axes= TRUE)
+plot(network["bicycle"], add=TRUE)
+#top 5street routes
+top_street_cycle <- top_n(network, 4500, bicycle)
+plot(liv.shape$geometry, axes=TRUE)
+plot(top_street_cycle$geometry, col="red", add=TRUE)
+#top 5 go dutch
+top_street_godutch <- top_n(network,4500, dutch_slc)
+plot(liv.shape$geometry, axes=TRUE)
+plot(top_street_godutch$geometry, col="red", add=TRUE)
+plot(top_street_cycle$geometry, col="green", add=TRUE)
+```
+
+```{r}
+## Scenarios of change
+#generate a godutch scenario
+bike_top$euclidean_dist <- as.numeric(sf::st_length(isle_short))
+isle_short$pcycle_dutch <- uptake_pct_godutch(
+  distance=isle_short
+)
+```
+
+```{r}
+#Routing, this plots single line
+route_bike <- route_osrm(bike_top)
+```
+
+```{r}
+#plot
+tm_shape(liv.shape) + tm_borders() +
+tm_shape(route_bike)+ tm_lines(lwd = 5)
+```
+
+```{r}
+#Load route network available at LSOA level
+lcr_network <- get_pct_rnet(region = "liverpool-city-region", geography = "lsoa")
+summary(lcr_network$bicycle)
+plot(lcr_network$geometry)
+```
+
+```{r}
+#clip lcr network with lcr region
+liv_shape <- pct_regions[pct_regions$region_name=="liverpool-city-region", ]
+st_crs(liv_shape)
+lcr_net.clip <- lcr_network[liv_shape, ]
+plot(lcr_net.clip$geometry)
+```
+
+
+
+```{r}
+#top 10 route by bike
+summary(lcr_net.clip$bicycle)
+lcr.top10bike <- top_n(lcr_net.clip, 10, bicycle)
+lct.top100bike <- top_n(lcr_network, 100, bicycle)
+lcr.top500bike <- top_n(lcr_net.clip, 9000, bicycle)
+top.bike <- top_n(lcr_net.clip, 4000, bicycle)
+plot(liv.shape$geometry, axes=TRUE)
+plot(lcr.top500bike$geometry, add=TRUE, col="red")
+```
+
+```{r}
+#create the top 30 cycling routes in LCR
+top.routes <- top_n(lcr_net.clip, 1000, bicycle)
+summary(top.routes$bicycle) 
+```
+
+
+#calculate distance for both cycle and car
+#calculate distance of commute by car
+lcr.top500bike$distance <- st_length(lcr.top500bike$bicycle)
+
+
+```{r}
+#Route summarized with overline
+#this results in a shape without any data, just lines
+route_test<- overline(sl = network, attrib = "bicycle")
+plot(route_test)
+```
+
+When saved as a shapefile it can be modified in qgis, better visualization.
+```{r}
+st_write(lcr.top500bike, "route_test.shp", driver = "ESRI Shapefile")
+```
+
+
+route
+
+Use route as well
+```{r}
+#Map of the most used routes
+route_cycle <- tm_shape(boundary)+tm_borders()+tm_fill()+
+  tm_shape(lcr.top500bike)+
+  tm_lines(palette = "plasma", breaks = c(0, 20, 50, 80,100,300),
+    lwd = "bicycle",
+    scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.9,
+    col = "bicycle",
+    title = "Commutes by cycle",
+    legend.lwd.show = FALSE)+
+    tm_scale_bar(size=.4, width = 0.15, position = c("left", "bottom")) +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.5,
+    legend.stack="horizontal")
+route_cycle
+```
+
+```{r}
+tmap_save(route_cycle, filename = "route_cycle.jpeg")
+```
+
+```{r}
+#try plotting both desire lines and cycling network in the same map
+tm_shape(boundary) + tm_borders() + tm_fill("grey86")+
+  tm_shape(bike.top) +
+  tm_lines(col = "black") +
+  
+  tm_scale_bar(size=.5, width = 0.15,lwd= 0.3,
+               position = c("left", "bottom"))+
+   tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.6,
+    legend.stack="vertical")
+```
+
+
+```{r}
+#to plot a network using routes fast
+#load data for all routes
+routes_commute <- get_pct_routes_fast(region = "liverpool-city-region", geography = "msoa")
+lines_commute <- get_pct_lines(region = "liverpool-city-region", geography = "msoa")
+```
+
+
+
+```{r}
+#subset data keep table only no geo
+lines_commute <- lines_commute %>%
+  st_drop_geometry() %>%
+  select(id, bicycle, dutch_slc)
+routes_commute <- routes_commute %>%
+  select(id)
+```
+
+```{r}
+#dont know where this came from
+#join data
+routes_commute = left_join(routes_commute, lines_commute)
+plot(routes_commute["bicycle"])
+```
+
+```{r}
+#create route network
+rnet <- overline2(x=routes_commute, "bicycle")
+tm_shape(liv.shape)+tm_polygons()+
+  tm_shape(rnet)+tm_lines(lwd = "bicycle", scale = 9, col = "bicycle" )
+```
+
+#calculate distance for both cycle and car
+#calculate distance of commute by car
+isle_top_car$Distance <-   st_length(isle_top_car)
+
+#to.place<- c(coords here)
+#routes <- otp_plan(optcon = optcon,
+fromPlace= lsoa(example),
+tpPlace= to.place)
+
+```{r}
+boundary <- st_read("LCR_boundary.shp")
+st_crs(boundary)
+```
+
+```{r}
+#reproject to osgb36
+rnet_proj = st_transform(rnet, st_crs(boundary))
+lcr_network_proj = st_transform(lcr_network, st_crs(boundary))
+st_crs(rnet_proj)
+```
+
+
+```{r}
+#compare rnet and lcr_network
+#save rnet
+st_write(rnet_proj, "rnet_strplanr_proj.shp", driver = "ESRI Shapefile")
+#save lcr_network
+st_write(lcr_network_proj, "network_pct_proj.shp", driver="ESRI Shapefile")
+```
+
+
+
+Exercise at PCT workshop
+```{r}
+#Identify cycling routes street level and compare to the existent cycling infrastructure
+lcr_network <- get_pct_rnet(region = "liverpool-city-region", geography = "msoa")
+plot(lcr_network$geometry)
+#load lcr zone
+lcr_zone <- pct_regions[pct_regions$region_name=="liverpool-city-region", ]
+lcr_poly <- get_pct_zones(region="liverpool-city-region", geography = "lsoa")
+plot(lcr_zone$geometry, axes=TRUE)
+plot(lcr_network$geometry, add=TRUE, col="red")
+
+#top 10 route by bike
+summary(lcr_network$bicycle)
+lcr.top10bike <- top_n(lcr_network, 10, bicycle)
+lct.top100bike <- top_n(lcr_network, 100, bicycle)
+lcr.top500bike <- top_n(lcr_network, 500, bicycle)
+plot(lcr_zone$geometry, axes=TRUE)
+plot(lcr.top500bike$geometry, add=TRUE, col="red")
+
+
+tm_shape(lcr.top500bike)+tm_lines(lcr.top500bike)
+tm_shape(shape.wy)+tm_polygons()
+
+setwd("C:/Users/PipeReds/DatAnywhere/SGVROJA2/Documents/PCT")
+getwd()
+#load road infrastructure
+osm_cycle <- `osm-lines`
+#set projection
+osm_cycle = st_transform(osm_cycle, st_crs(lcr_zone))
+#clip osm cycle to lcr zone
+osm_lcr <- osm_cycle[lcr_zone, ]
+#create top 20 routes
+
+plot(lcr_zone$geometry, axes=TRUE)
+plot(osm_lcr["roadtype"], add=TRUE, col="red")
+#osm lcr subset to cycleway only or something
+```
+

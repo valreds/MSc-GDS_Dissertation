@@ -1,0 +1,503 @@
+
+```{r}
+library(sf)
+library(tidyverse)
+
+#install.packages("spDataLarge")
+#library(spDataLarge)
+library(stplanr)
+library(tmap)
+library(pct)
+library(dplyr)
+library(rgdal)
+library(sp)
+library(ggplot2)
+```
+
+```{r}
+#clear environment
+rm (list=ls( ))
+```
+
+
+```{r}
+# Load OD table for all UK
+OD_UK <- pct::get_od()
+#Add LCR zone polygon with pct tool
+liv_shape <- pct_regions[pct_regions$region_name=="liverpool-city-region", ]
+#load MSOA centroids
+centroids <- get_centroids_ew()
+#set the same coordinates system
+centroids = st_transform(centroids, st_crs(liv_shape))
+#clip centroids for LCR
+centroids.lcr <- centroids[liv_shape, ]
+#filter flows within the lcr from the od uk
+od.LCR <- OD_UK %>%
+  filter(geo_code1 %in% centroids.lcr$msoa11cd)%>%
+  filter(geo_code2 %in% centroids.lcr$msoa11cd)
+#subset flows
+#od.LCR = OD_UK[
+#  OD_UK$geo_code1 %in% centroids.lcr$msoa11cd &
+#  OD_UK$geo_code2 %in% centroids.lcr$msoa11cd , 
+]
+```
+
+```{r}
+#create desire lines for LCR
+lines.lcr <- od2line(od.LCR, centroids.lcr)
+nrow(lines.lcr)
+#create inter regional flows
+lines.inter <- lines.lcr %>% filter(geo_code1 != geo_code2)
+#create intra regional
+lines.intra <- lines.lcr %>% filter(geo_code1 == geo_code2)
+```
+
+```{r}
+head(lines.inter)
+```
+
+
+```{r}
+write.csv(lines.inter, file = "lines_inter.csv")
+```
+
+
+```{r}
+#group origins by msoa code
+#get zones/MSOA areas
+zones_liv = pct::get_pct_zones("liverpool-city-region") %>% 
+  select("geo_code")
+origin_attributes = lines.inter %>% 
+  sf::st_drop_geometry() %>% 
+  group_by(geo_code1) %>% 
+  summarize_if(is.numeric, sum) %>% 
+  dplyr::rename(geo_code = geo_code1)
+# origin_attributes <-
+zones_origins = left_join(zones_liv, origin_attributes, by = "geo_code")
+#Plot columns 4-14
+plot(zones_origins[c(4:14)], border = NA, max.plot=11)
+```
+
+```{r}
+#Save as shp
+#st_write(zones_destin, "od_destination.shp", driver="ESRI Shapefile")
+```
+
+```{r}
+#create an origins map with all flows not only top
+origin_all.att = lines.lcr %>% 
+  sf::st_drop_geometry() %>% 
+  group_by(geo_code1) %>% 
+  summarize_if(is.numeric, sum) %>% 
+  dplyr::rename(geo_code = geo_code1)
+# origin_attributes <-
+zones_origins_all = left_join(zones_liv, origin_all.att, by = "geo_code")
+#Plot columns 4-14
+plot(zones_origins_all[c(4:14)], border = NA, max.plot=11)
+```
+
+
+```{r}
+#group destination top flows by msoa
+zones_liv = pct::get_pct_zones("liverpool-city-region") %>% 
+  select("geo_code")
+destination = lines.inter %>% 
+  sf::st_drop_geometry() %>% 
+  group_by(geo_code2) %>% 
+  summarize_if(is.numeric, sum) %>%
+  dplyr::rename(geo_code = geo_code2) %>% 
+  #mutate_at(vars(-matches("geo_|all")), funs( . / all)) %>% 
+left_join(zones_liv, ., by = "geo_code")
+#plot columns 2-13
+plot(destination[c(2:13)], border = NA, max.plot=12)
+```
+
+```{r}
+#create a destination for all flows
+destination_all = lines.lcr %>% 
+  sf::st_drop_geometry() %>% 
+  group_by(geo_code2) %>% 
+  summarize_if(is.numeric, sum) %>%
+  dplyr::rename(geo_code = geo_code2) %>% 
+  #mutate_at(vars(-matches("geo_|all")), funs( . / all)) %>% 
+  left_join(zones_liv, ., by = "geo_code")
+#plot columns 4-14
+plot(destination_all[c(4:14)], border = NA, max.plot=11)
+```
+
+```{r}
+st_write(destination_all, "Dest_zones_all.shp", driver= "ESRI Shapefile")
+```
+
+
+```{r}
+head(destination)
+```
+
+
+```{r}
+#another method to create destination by MSOA
+#destination_test <- lines.inter %>%
+ # group_by(geo_code2) %>%
+ # summarize_if(is.numeric, sum)%>%
+ # dplyr::select(geo_code = geo_code2, all_dest = all)%>%
+ # st_join(origin_zones, ., by = "geo_code")
+```
+
+```{r}
+#More tests
+#destination_test %>% 
+#  group_by(geo_code.x)
+```
+
+
+```{r}
+#check if destinations have the same number of areas as zones liv
+summary(destination$geo_code %in% zones_liv$geo_code)
+```
+
+
+```{r}
+head(origin_attributes)
+```
+
+```{r}
+#Save as csv
+write.csv(destination, file = "OD_destination.csv")
+```
+
+
+```{r}
+#Origin attributes is table, needs to have coordinates to be able to plot them
+#origin_zones <- left_join(zones_liv, origin_attributes, by="geo_code")
+#names(origin_zones)
+#nrow(origin_zones)
+#join the all origins table
+#origin_zones.all <- left_join(zones_liv, origin_zones, by="geo_code")
+```
+
+```{r}
+plot(destination["bicycle"])
+```
+
+
+
+```{r}
+#subset destination to remove categorical variables
+#correlation <- LSOA_model[,c(6,8,10,12:16,19,21)]
+#Rename columns of top destinations
+colnames(destination) <- c("geo_code.d", "all.d", "fromhome.d", "lightRail.d","train.d","bus.d","taxi.d","motorbike.d","cardriver.d","carpassenger.d", "bicycle.d", "foot.d", "other.d", "geometry" )
+#rename columns of all destinations
+#colnames(destination_all) <- c("geo_code.d", "all.d", "fromhome.d", "lightRail.d","train.d","bus.d","taxi.d","motorbike.d","cardriver.d","carpassenger.d", "bicycle.d", "foot.d", "other.d", "geometry" )
+```
+
+```{r}
+head(origin_zones)
+```
+
+
+
+```{r}
+#join destination zones with origin zones
+od.zones <- st_join(zones_origins, destination, by="geo_code")
+names(od.zones)
+nrow(od.zones)
+#Join for both inter and intra flows
+#od.zones_all <- st_join(zones_origins_all, destination_all, by="geo_code")
+#names(od.zones_all)
+#nrow(od.zones_all)
+```
+
+```{r}
+head(od.zones)
+```
+
+
+```{r}
+#export od zones as shp
+#st_write(od.zones, "OD_zones.shp", driver = "ESRI Shapefile")
+#save as csv
+#write.csv(od.zones, file="OD_polygons.csv")
+```
+
+```{r}
+#simple map for top flows origin and destination
+qtm(od.zones, c("all", "all.d"))+
+  tm_layout(panel.labels = c("Origin", "Destination"), legend.outside = TRUE)
+```
+
+```{r}
+qtm(od.zones_all, c("all", "all.d"))+
+  tm_layout(panel.labels = c("Origin", "Destination"), legend.outside = TRUE)
+```
+
+```{r}
+colnames(od.zones)
+```
+
+```{r}
+#save as table drop geometry
+#subset data keep table only no geo
+od_zone_nogeo <- od.zones %>%
+  st_drop_geometry() %>%
+  select(geo_code,all,bicycle, geo_code.d, all.d, bicycle.d)
+#save as csv
+write.csv(od_zone_nogeo, file="od_zones_check.csv")
+```
+
+
+```{r}
+#tmap version
+tm_shape(od.zones) + tm_fill(c("all", "all.d"), 
+                             palette = "-viridis", n= 5,
+                             breaks = c(1,1000,2000,3000,4000,20000),
+                             title = "LCR commutes")  +
+  tm_borders(col = "black", lwd = 0.5) + 
+  tm_facets(free.scales = FALSE, nrow = 2) +
+  tm_layout(panel.labels = c("Zone of origin", "Zone of destination" ))
+```
+
+```{r}
+summary(od.zones$all)
+```
+
+tm_scale_bar(size=.4) +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.6,
+    legend.stack="horizontal")
+```{r}
+#create separate maps for origin and destination
+#better version
+od_zone <- tm_shape(od.zones) + tm_fill(c("all", "all.d"), 
+                             palette = "-plasma", n=5,
+                             breaks = c(0,800,1500,2000,3000,4000),
+                             title = "Total commutes")+
+  tm_borders(col = "grey", lwd = 0.3) + 
+  tm_facets(free.scales =FALSE, ncol= 2)+
+  tm_scale_bar(breaks = 3, size = 0.3,position = c("left", "bottom"))+
+  tm_layout(legend.position = c("right", "top"), panel.labels = c("Origin MSOA", "Destination MSOA"))
+od_zone
+```
+palette = "viridis", n = 5, ...)
+```{r}
+tmaptools::palette_explorer()
+```
+
+```{r}
+#get bbox
+bb <- st_bbox(liv_shape)
+```
+
+```{r}
+boundary = st_read("LCR_surround.shp")
+```
+tm_shape(boundary)+tm_polygons()+
+bg.color = "grey85"
+
+```{r}
+summary(od.zones$all)
+summary(destination$all.d)
+summary(destination_all$all.d)
+```
+
+##### create separate maps for origin and destination
+```{r}
+#destination top flows
+dest_zones <- tm_shape(destination) + tm_fill("all.d", 
+                             palette = "-viridis", n=5,
+                             breaks = c(0,600,1500,5000,10000,25000),
+                             title = "Total trips")  +
+  tm_borders(col = "grey", lwd = 0.5) + 
+  tm_scale_bar(size = 0.3, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.5, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+dest_zones
+```
+
+```{r}
+#destination all flows
+dest_zones.all <- tm_shape(destination_all) + tm_fill("all.d", 
+                             palette = "-viridis", n=5,
+                             breaks = c(0,1000,3000,6000,10000,25000),
+                             title = "Total trips")  +
+  tm_borders(col = "grey", lwd = 0.5) + 
+  tm_scale_bar(size = 0.3, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.5, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+dest_zones.all
+```
+
+
+```{r}
+tmap_save(dest_zones, filename = "dest_map.jpeg")
+```
+
+```{r}
+summary(od.zones$all)
+summary(zones_origins$all)
+summary(zones_origins_all$all)
+
+```
+
+
+
+```{r}
+#Create separate map for origins top flows
+origin_zone <- tm_shape(od.zones) + tm_fill("all", 
+                             palette = "-viridis", n=5,
+                             breaks = c(0,800,1500,2500,4000),
+                             title = "Total trips")  +
+  tm_borders(col = "grey", lwd = 0.3) + 
+  tm_scale_bar(size = 0.4, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+origin_zone
+```
+
+```{r}
+tmap_save(origin_zone, filename = "origin_zone.jpeg")
+```
+
+
+```{r}
+#Create separate map for origins
+origin_zone.all <- tm_shape(zones_origins_all) + tm_fill("all", 
+                             palette = "-viridis", n=5,
+                             breaks = c(0,800,1500,2500,4000),
+                             title = "Total trips")  +
+  tm_borders(col = "grey", lwd = 0.3) + 
+  tm_scale_bar(size = 0.4, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+origin_zone.all
+```
+
+
+
+```{r}
+tmap_save(origin_zone, filename = "origin_zone.jpeg")
+```
+
+
+```{r}
+library(RColorBrewer)
+display.brewer.all()
+```
+
+```{r}
+summary(od.zones$bicycle)
+summary(od.zones$bicycle.d)
+```
+
+
+```{r}
+#create zone maps for cycling commutes
+od_bike <- tm_shape(od.zones) + tm_fill(c("bicycle", "bicycle.d"), 
+                             palette = "-plasma", n=5,
+                             breaks = c(0,10,20,40,60,200),
+                             title = "Total commutes")+
+  tm_borders(col = "grey", lwd = 0.3) + 
+  tm_facets(free.scales =FALSE, ncol= 2)+
+  tm_scale_bar(breaks = 3, size = 0.3,position = c("left", "bottom"))+
+  tm_layout(legend.position = c("right", "top"), panel.labels = c("Origin MSOA", "Destination MSOA"))
+od_bike
+```
+
+```{r}
+summary(destination_all$bicycle.d)
+```
+
+
+```{r}
+#create separate maps for origin and destination
+#destination bike
+dest_bike <- tm_shape(destination_all) + tm_fill("bicycle.d", 
+                             palette = "-viridis", n=5,
+                             breaks = c(1,20,50,100,450),
+                             title = "Total trips")  +
+  tm_borders(col = "grey", lwd = 0.5) + 
+  tm_scale_bar(size = 0.4, width = 0.15 ,position = c("left", "bottom"))+
+  tm_compass(type = "arrow", size = 0.5, position = c("right", "bottom"))+
+  tm_layout(legend.position = c("right", "top"))
+dest_bike
+```
+
+
+
+```{r}
+#Find commutes with trips less than 5
+#select lowest bicycle flows the mean is 37 and max is 47
+#define minimum trips for all flows
+# <- lines.inter %>% filter (bicycle >= 2 & bicycle <= 4) %>%
+#  count(bicycle)
+#Define and count trips 1
+min_trips <- lines.inter %>% filter (bicycle == 1) %>%
+  count(bicycle)
+#Define trips bigger than 5
+bike.top <- lines.inter %>% filter (bicycle >= 4)
+```
+
+
+Total trips per trajectory for inter regional flows
+
+2 trips = 782 flows
+3 trips = 346 flows
+4 trips = 178
+
+```{r}
+#Create map wth flows smaller than 4 trips. COmpletelet 
+#bike.min = bike.min %>% 
+#  arrange(bicycle) 
+tm_shape(boundary) + tm_borders() + tm_fill()+
+  tm_shape(bike.top) +
+  tm_lines(palette = "plasma", breaks = c(4, 10, 20, 40,50),
+    lwd = "all",
+    n=5,
+    scale = 8,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "bicycle",
+    title = "Commutes by cycle",
+    legend.lwd.show = FALSE) +
+  tm_scale_bar(size=.4, width = 0.15, position = c("left", "bottom")) +
+    tm_compass(type = "arrow", size = 0.7, position = c("right", "bottom"))+
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white",
+    legend.position = c("right", "top"),
+    legend.text.size= 0.6,
+    legend.stack="horizontal")
+```
+
+```{r}
+
+```
+
+
+```{r}
+#all commutes minimum 5 trips
+#plot with tmap
+#tmap_mode("plot")
+#min_trips = min_trips %>% 
+ # arrange(bicycle)
+tm_shape(boundary) + tm_borders() + tm_fill()+
+  tm_shape(min_trips) +
+  tm_lines(palette = "plasma", breaks = c(0,2,3,4,5),
+    #lwd = "bicycle",
+    #scale = 9,
+    title.lwd = "Number of trips",
+    alpha = 0.5,
+    col = "bicycle",
+    title = "Total comutes",
+    legend.lwd.show = FALSE
+  ) +
+  tm_scale_bar() +
+  tm_layout(
+    legend.bg.alpha = 0.5,
+    legend.bg.color = "white"
+    )
+```
+

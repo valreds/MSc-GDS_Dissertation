@@ -1,0 +1,508 @@
+ 
+ ---
+title: "Spatial Autocorrelation and GWR"
+author: "ID 201300196"
+date: "15 March 2019"
+output: html_document
+---
+
+```{r}
+getwd()
+```
+
+```{r}
+#Clean environment
+rm (list=ls( ))
+```
+
+```{r}
+#Load libraries
+#install.packages("sp")
+#library("sp")
+#install.packages("maptools", depend = TRUE, lib = getwd())
+#library(maptools, lib.loc = getwd())
+
+# Download / install and then load stringr
+#install.packages("stringr", depend = TRUE, lib = getwd())
+#library(stringr, lib.loc = getwd())
+
+# Download / install and then load rgeos
+#install.packages("rgeos", depend = TRUE, lib = getwd())
+#library("rgeos", lib.loc = getwd())
+#Library to load spatial data
+library(rgdal)
+#library to create bins and class intervals
+library(classInt)
+#Library to select colour palette
+library(RColorBrewer)
+#Library for mapping
+#install.packages("tmap")
+library(tmap)
+# Download / install and then load spdep
+install.packages("spdep")
+library(spdep)
+install.packages("spgwr")
+library(spgwr)
+```
+
+```{r}
+getwd()
+```
+
+
+```{r}
+#Read the data skip two first rows
+nwemploy <- read.csv("Data_AGE_ECOACT_UNIT.csv", header = FALSE, skip = 2)
+quals <- read.csv("Data_AGE_QUALGA_UNIT.csv", header = FALSE, skip = 2)
+```
+
+```{r}
+#subset quals
+quals <- quals[,c(1:7)]
+#change column names from qualification table
+colnames(quals) <- c("ID", "geocode", "label", "type", "typeid", "Total_noQ", "No_quals")
+```
+
+```{r}
+#Rename the columns
+colnames(nwemploy) <- c("ID", "geocode", "label", "type", "typeid", "alleconact", 
+    "employeePT", "employeeFT", "selfempwithPT", "selfempwithFT", "selfempnoPT", 
+    "selfempnoFT", "unemploy", "LTsickdis")
+```
+
+```{r}
+#Calculate total employed
+nwemploy$employed <- nwemploy$employeePT + nwemploy$employeeFT + nwemploy$selfempwithPT + 
+    nwemploy$selfempwithFT + nwemploy$selfempnoPT + nwemploy$selfempnoFT
+```
+
+```{r}
+#Calculate total
+nwemploy$total <- nwemploy$employed + nwemploy$unemploy
+```
+
+```{r}
+#Next calculate the percentage unemployed
+nwemploy$unemployPC <- (nwemploy$unemploy/nwemploy$total) * 100
+```
+
+```{r}
+#Calculate percentage of population with no quals
+quals$Perc_noquals <- (quals$No_quals/quals$Total)*100
+```
+
+```{r}
+#Load shapefiles
+MSOA <- readOGR("MSOA_LCR.shp")
+```
+
+```{r}
+#USe origin and destination from Method_OD
+
+```
+
+```{r}
+#Join no qualifications data to spatial data
+nwLSOA <- merge(nwLSOA, quals, by.x="geo_code", by.y ="geocode", all.x=TRUE)
+```
+
+##### Global Spatial autocorrelation 
+For the first aim, this analysis relies on spatial autocorrelation, which is the extent to which a variable is correlated with itself at a spatial level (Lloyd, 2010). Moran's I provide a global coefficient to measure the spatial autocorrelation and whether is statistically significant and not due to randomness (Stewart Fotheringham, Brunsdon and Charlton, 2007). Moran's I coefficient can be understood as positive (= +1) perfect autocorrelation, this means that similar values are likely to be clustered with other similar values. A perfect negative correlation coefficient (= -1), indicate dissimilar clusters grouped together or that data are more spread over space. Whereas a measure close to zero suggest no autocorrelation or spatial randomness. (Llloyd, 2010).
+
+To calculate Moran's I, a weights matrix is the key element; R needs a list of neighbours for each location which can be created using contiguity methods, such as queen (sharing edges or vertex), rook (sharing edges) or distance (Anselin, 2018). In the following analysis, we evaluate using queen and distance.
+
+To calculate Moran's I, a weights matrix is the key element for R needs a list of neighbours for each location which can be created using contiguity methods, such as queen (sharing edges or vertex), rook (sharing edges) or distance (Anselin, 2018). In the following analysis, we evaluate using queen and distance.
+
+```{r}
+#finds the neighbors of each MSOA using queen
+MSOAnb <- poly2nb(MSOA, queen = TRUE)
+#create a weight matrix
+MSOA.wt <- nb2listw(MSOAnb)
+#create neighbors for origins
+origin.nb <- poly2nb(origins, queen = TRUE)
+#create a weight matrix
+origin.wt <- nb2listw(origin.nb)
+#create neighbors for destination
+destin.nb <- poly2nb(destination, queen = TRUE)
+#create a weight matrix
+destin.wt <- nb2listw(destin.nb)
+```
+
+```{r}
+# Summarise the queen weights values
+summary(unlist(MSOA.wt$weights))
+```
+
+
+###### Table 1. Global Moran's I for unemployment using queen contiguity matrix
+```{r}
+#Using queen matrix 
+origin_moran <- moran.test(origins$all, origin.wt)
+origin_moran
+#check destinations
+destin_moran <- moran.test(destination$all, destin.wt)
+destin_moran
+```
+
+Table 1 shows that global Moran's I coefficient for all origins is 0.28 positive and statistically significant (p < 0.05), which indicates that the OD in the LCR MSOAs tend to be clustered with other MSOA with similar OD flows.
+
+```{r}
+#create percentage of longterm sick or disabled
+nwLSOA$lsdpc <- nwLSOA$LTsickdis / nwLSOA$alleconact
+```
+
+###### Table 2. Global Moran'I for explanatory variable 1, long-term sick or disabled
+```{r}
+#Using queen matrix 
+moransillness <- moran.test(nwLSOA$lsdpc, LSOA.wt)
+moransillness
+```
+
+###### Table 3. Global Moran'I for explanatory variable 2, No qualifications
+```{r}
+#Using queen matrix 
+moransnoquals <- moran.test(nwLSOA$No_quals, LSOA.wt)
+moransnoquals
+```
+
+Moran's I coefficient for long-term sick and no qualifications is 0.51 and 0.50 respectively, both are statistically significant (p < 0.05) (table 2, 3). Thus, we can conclude that there is evidence of clustering for the two variables; however, contiguity assume that there is no spatial variation between neighbours and variables and therefore, a more detailed analysis is needed to understand the spatial variation of variables in space using distance-based contiguity matrix (Stewart Fotheringham, Brunsdon and Charlton, 2007).
+
+
+##### Distance-based matrix
+The distance-based weighting uses a bandwidth that determines the value of each neighbour, closer areas will receive larger values and more distant areas will receive lower weights (Inverse distance weight) (Lloyd, 2012).  In other words, each weight value decreases as the distance between the reference location and a neighbouring point increases.
+
+For the distance matrix, the weight values are determined by the radius and exponent, the larger the exponent, the sharper the decline of distance, thus, the larger the values assigned to closer values. Whereas the smaller the exponent, the larger the area that the matrix will cover but closer values will get lower weights (Lloyd, 2010).  In many statistical tools, the default exponent is 2 and there is no rule to determine which exponent is the optimum value. This is why evaluating Moran's coefficient for two exponents is an important step to determine optimal value for the model. 
+
+```{r}
+#Extract LSOA centroids
+LSOAXY <- SpatialPointsDataFrame(coordinates(nwLSOA), data=as(nwLSOA, "data.frame")[c("geo_code")])
+```
+
+```{r}
+#creating the contiguity matrix
+LSOA.dists <- as.matrix(dist(cbind(LSOAXY$coords.x1, LSOAXY$coords.x2)))
+#inverse distance, closer distances get larger values
+LSOA.dists.inv <- 1/(LSOA.dists^2)
+#Creating a radious of 20km
+LSOA.dists.inv[LSOA.dists > 20000] <- 0
+diag(LSOA.dists.inv) <- 0
+LSOA.dists.invR <- LSOA.dists.inv/rowSums(LSOA.dists.inv)
+LSOA.dists.invR[1:5, 1:5]
+```
+
+```{r}
+# Convert the weights matrix into a weights list object
+LSOA.dists.inv.w <- mat2listw(LSOA.dists.invR)
+```
+
+```{r}
+# Compute Moran's I for unemployment
+moransUnemployID <- moran.test(nwLSOA$unemployPC, LSOA.dists.inv.w)
+```
+
+```{r}
+# Compute Moran's I for long-time sick using distane matrix
+moransSickDist <- moran.test(nwLSOA$lsdpc, LSOA.dists.inv.w)
+```
+
+```{r}
+# Compute Moran's I for no quals using distance matrix
+moransNoqualsDist<- moran.test(nwLSOA$Perc_noquals, LSOA.dists.inv.w)
+```
+
+
+###### Table 4. Moran's I coefficient for unemployment, long-term sick and no qualifications using exponent 2
+```{r}
+#Check results for the three variables
+moransUnemployID
+moransSickDist
+moransNoqualsDist
+```
+
+Table 4 contains the results of Moran's I using a distance-based matrix; the coefficients show a positive and statistically significant (p < 0.05) correlation between 0.29 and 0.35. Moreover, table 6 shows the results of Moran's I using an exponent of 1.5; although the coefficients (0.19-0.15) are still positive and statistically significant (p-value <0.05), coefficients from table 5 show stronger correlation mainly because larger exponents increase the values of closer observations. For this reason, we use exponent "2" for the model.
+
+```{r}
+#creating the contiguity matrix change exponent to 1.5
+#inverse distance, closer distances get larger values
+LSOA.dists.inv1.5 <- 1/(LSOA.dists^1.5)
+#Creating a radious of 20km
+LSOA.dists.inv[LSOA.dists > 20000] <- 0
+diag(LSOA.dists.inv1.5) <- 0
+LSOA.dists.invR1.5 <- LSOA.dists.inv1.5/rowSums(LSOA.dists.inv1.5)
+LSOA.dists.invR1.5[1:5, 1:5]
+```
+
+```{r}
+# Convert the weights matrix into a weights list object
+LSOA.dists.inv.w1.5 <- mat2listw(LSOA.dists.invR1.5)
+```
+
+```{r}
+# Compute Moran's I for unemployment
+moransUnemployID1.5 <- moran.test(nwLSOA$unemployPC, LSOA.dists.inv.w1.5)
+```
+
+```{r}
+# Compute Moran's I for long-time sick using distane matrix
+moransSickDist1.5 <- moran.test(nwLSOA$lsdpc, LSOA.dists.inv.w1.5)
+```
+
+
+```{r}
+# Compute Moran's I for no quals using distance matrix
+moransNoqualsDist1.5 <- moran.test(nwLSOA$Perc_noquals, LSOA.dists.inv.w1.5)
+```
+
+###### Table 5. Moran's I for unemployment, long-term sick and no qualifications, 1.5 exponent
+```{r}
+#Check results for the three variables
+moransUnemployID1.5
+moransSickDist1.5
+moransNoqualsDist1.5
+```
+
+##### Local spatial autocorrelation
+So far, we have used Global Moran's I coefficient to assess the autocorrelation behaviour of the whole dataset. Nonetheless, if variables tend to vary in space, local spatial autocorrelation provide a measure of clustering for each location to understand local patterns of similar and dissimilar values grouped together (Anselin and Rey, 2014). 
+
+One way to assess this clustering effect is plotting the results using quadrants to identify areas of "hot spots" (high-high values), "cold spots" (low - low), as well as values considered as outliers (high-low, low-high) (Anselin, 1995).
+
+```{r}
+# Calculate local Moran's I
+dest_lmi <- as.data.frame(localmoran(destination$all, origin.wt))
+
+# Join local moran I to spatial data
+msoa_dest.lmi <- SpatialPolygonsDataFrame(MSOA, dest_lmi, match.ID = FALSE)
+```
+
+
+```{r}
+#add boundary of north west
+boundary <- readOGR("LCR_Boundary.shp")
+```
+
+```{r}
+#create a map for the cuadrants for unemployment
+quadrant <- vector(mode="numeric",length=nrow(msoa_dest.lmi))
+# centers the variable of interest around its mean
+all.Mean <- destination$all - mean(destination$all)
+# centers the local Moran's around the mean
+C_mI <- msoa_dest.lmi$Ii - mean(msoa_dest.lmi$Ii)
+
+# significance threshold
+signif <- 0.1
+
+#create quadrants
+quadrant[all.Mean < 0 & C_mI < 0] <- 1
+quadrant[all.Mean < 0 & C_mI > 0] <- 2
+quadrant[all.Mean > 0 & C_mI < 0] <- 3
+#category 0 is non significant
+#quadrant[all.Mean[, 200] > signif] <- 0
+
+#plot results into a map
+#create breaks
+brks <- c(0, 1, 2, 3, 4)
+#Define colors
+colors <- c("white", "blue", rgb(0, 0, 1, alpha = 0.4), rgb(1, 0, 0, alpha = 0.4), 
+    "red")
+#plot polygon, colors and breaks
+plot(msoa_dest.lmi, border = NA, col = colors[findInterval(quadrant, brks, all.inside = FALSE)])
+#Plot boundary
+plot(boundary, add = TRUE)
+box()
+#add legend and title
+legend("bottomright", legend = c("non-significant", "low-low", "low-high", "high-low", 
+    "high-high"), fill = colors, bty = "n", cex = 0.7, y.intersp = 1, x.intersp = 1)
+title("Map 1. Local Moran's I unemployment")
+```
+
+Map 1 shows red areas are high values surrounded by high values and that they are surrounded by non-significant clusters. Possibly since high-high values are probably located within cities. North and south of the region display low-low values and low-high values, which can be interpreted as lower rates of unemployment in these areas or clustering patterns are not significant.
+
+```{r}
+#create a map for no qualifications and add quadrants 
+### to create LISA cluster map ###
+quadrant <- vector(mode="numeric",length=nrow(LSOA_NoqualsLmi))
+# centers the variable of interest around its mean
+NoqualsMean <- nwLSOA$Perc_noquals - mean(nwLSOA$Perc_noquals)
+# centers the local Moran's around the mean
+C_mI_noqual <- LSOA_NoqualsLmi$Ii - mean(LSOA_NoqualsLmi$Ii)
+
+# significance threshold
+signif <- 0.1
+
+#create quadrants
+quadrant[NoqualsMean < 0 & C_mI_noqual < 0] <- 1
+quadrant[NoqualsMean < 0 & C_mI_noqual > 0] <- 2
+quadrant[NoqualsMean > 0 & C_mI_noqual < 0] <- 3
+#category 0 is non significant
+quadrant[lmi_NoQuals[, 5] > signif] <- 0
+
+#plot results into a map
+#create breaks
+brks <- c(0, 1, 2, 3, 4)
+#Define colors
+colors <- c("white", "blue", rgb(0, 0, 1, alpha = 0.4), rgb(1, 0, 0, alpha = 0.4), 
+    "red")
+#plot polygon, colors and breaks
+plot(nwLSOA, border = NA, col = colors[findInterval(quadrant, brks, all.inside = FALSE)])
+#Plot north west boundary
+plot(nw, add = TRUE)
+box()
+#add legend and title
+legend("bottomright", legend = c("insignificant", "low-low", "low-high", "high-low", 
+    "high-high"), fill = colors, bty = "n", cex = 0.7, y.intersp = 1, x.intersp = 1)
+title("Map 2. Local Moran's I No Qualifications")
+```
+
+In map 2, the same pattern applies for spots of high-high no qualifications rates on areas on the central part of the region. Away from this area, most of the region clustering pattern is mostly not significant or low-high (spatial outliers).
+
+
+```{r}
+#create a map for long time sick and add quadrants
+### to create LISA cluster map ###
+quadrant_sick <- vector(mode="numeric",length=nrow(LSOA_SickLmi))
+# centers the variable of interest around its mean
+SickMean <- nwLSOA$lsdpc - mean(nwLSOA$lsdpc)
+# centers the local Moran's around the mean
+C_mI_sick <- LSOA_SickLmi$Ii - mean(LSOA_SickLmi$Ii)
+
+# significance threshold
+signif <- 0.1
+
+#create quadrants
+quadrant_sick[SickMean < 0 & C_mI_sick < 0] <- 1
+quadrant_sick[SickMean < 0 & C_mI_sick > 0] <- 2
+quadrant_sick[SickMean > 0 & C_mI_sick < 0] <- 3
+#category 0 is non significant
+quadrant[lmi_Sick[, 5] > signif] <- 0
+
+#plot results into a map
+#create breaks
+brks <- c(0, 1, 2, 3, 4)
+#Define colors
+colors <- c("white", "blue", rgb(0, 0, 1, alpha = 0.4), rgb(1, 0, 0, alpha = 0.4), 
+    "red")
+#plot polygon, colors and breaks
+plot(nwLSOA, border = NA, col = colors[findInterval(quadrant, brks, all.inside = FALSE)])
+#Plot north west boundary
+plot(nw, add = TRUE)
+box()
+#add legend and title
+legend("bottomright", legend = c("insignificant", "low-low", "low-high", "high-low", 
+    "high-high"), fill = colors, bty = "n", cex = 0.7, y.intersp = 1, x.intersp = 1)
+title("Map 3. Local Moran's I Long-term sick")
+```
+
+Lastly, map 3 depicts the same spots of high-high in the central part of the region, surrounded by non-significant values. Same situation occurs north and south of the region where there is no apparent clustering and some cold spots and outliers.
+
+As we have identified, variables do not present the same spatial behaviour within LSOAs. While global Moran's I is useful to provide and overall measure of the degree of clustering in a dataset, local Moran's I can help on assessing the clustering at a local scale. Both methods help to validate that data spatially autocorrelated and therefore, similar values tend to be grouped together with other similar values following Tobler's first law (Tobler, 2004).
+
+
+##### Variation of explanatory variables over space
+A linear regression model provides a global outlook of the relationship between variables but do not clarify the effects on areas (Stewart Fotheringham, Brunsdon and Charlton, 2007). Running the model (Table 6), the r-squared shows that the model is able to explain unemployment by 74%. This mean that even though that the model provides a good fit, the result is applied as a coefficient that applies for the whole dataset and do not take into account spatial nonstationarity (Brunsdon, Fotheringham and Charlton, 1996). 
+
+###### Table 6. Linear regression model for unemployment, long-term sick and no qualifications
+```{r}
+#create the model
+model_unempl <- lm(unemployPC ~ lsdpc + Perc_noquals, data = nwLSOA)
+summary(model_unempl)
+```
+
+
+###### Geographically weighted regression - non adaptive bandwidth
+Geographically weighted regression (GWR) is a tool that help ascertain two main spatial questions; first, how distributed are the values between areas, and secondly, how does the relationship between explanatory variables vary spatially (Lloyd, 2010). By plotting the outputs of a GWR, the observed effect of the variables in each area is particularly useful to understand areas where variables model fits well and others where weaker effects require model recalibration (Stewart Fotheringham, Brunsdon and Charlton, 2007; Tate and Atkinson, 2001).
+
+As we have seen in the creation of a distance-based matrix, in GWR the calibration of the models sensitivity lies on the size of the kernel or bandwidth. Following a Gaussian plot, a sharp drop in distance will result in model being applied over small geographical areas while larger decay will apply model relations to larger areas (Tate and Atkinson, 2001). 
+
+
+```{r}
+# Identify the optimal bandwidth using cross validation; the fixed bandwidth
+# Gaussian function is used
+bwG <- gwr.sel(unemployPC ~ lsdpc + Perc_noquals, data = nwLSOA, gweight = gwr.Gauss, verbose = FALSE)
+# View the selected bandwidth
+bwG
+```
+
+```{r}
+# Fit the GWR model using the bandwidth identified in the previous step
+gwrG <- gwr(unemployPC ~ lsdpc + Perc_noquals , data = nwLSOA, bandwidth = bwG, gweight = gwr.Gauss)
+# Summarise the GWR outputs
+summary(gwrG$SDF)
+```
+```{r}
+#Data contained in the GWR model
+names(gwrG)
+```
+
+##### Assessing the results of GWR coefficients
+To ascertain the spatial effects of the relation between variables, we plot the regression coefficients to analyse the variation of unemployment and then compare using a cross-validation approach to calculate bandwidth.
+
+```{r}
+# Plot local r-squared values
+spplot(gwrG$SDF, "localR2", col = "transparent", main = "Map 4. GWR non-adaptive R-squared")
+```
+
+Regarding the fit of the model, the largest R2 are located mainly in Cumbria county; the smallest values seem to be located close to Lancaster. In the southern part of these areas, R2 shows peaks at the main cities, such as Liverpool and Manchester, probably tight to the fact that these are the large urban concentrations and sickness and no qualifications are factors that affect unemployment rates. Outside urban areas, it is possible that unemployment is tight with rural or industrial activities decline.
+
+##### GWR cross-validation bandwidth
+Cross-validation is a method to recalibrate the model by calculating the optimal bandwidth until there is little variation on the results (Lloyd, 2010). The adaptive bandwidth represents a proportion of the total areas of the dataset; for instance, the result in figure 2 is accounting for only 6 of the total LSOAs on the region. Here is important to consider a better fit based on representativity, thus the selected bandwidth will be 0.03444185 which represents 151 of the total LSOAs. 
+
+```{r}
+# Identify the optimal bandwidth using cross validation; an adaptive
+# bandwidth bi-square function is used
+adapt.bw <- gwr.sel(unemployPC ~ lsdpc + Perc_noquals, data = nwLSOA, adapt = TRUE)
+```
+
+
+###### Figure 2. Calculated optimalbandwidth
+```{r}
+#check the suggested bandwidth
+adapt.bw
+```
+
+```{r}
+# Fit the GWR model using the selected bandwidth
+gwr_adaptative <- gwr(unemployPC ~ lsdpc + Perc_noquals, data = nwLSOA, adapt = 0.034, gweight = gwr.bisquare)
+# Summarise the GWR outputs
+summary(gwr_adaptative$SDF)
+```
+
+```{r}
+names(gwr_adaptative$SDF)
+```
+
+
+```{r}
+#create the map for slope values
+spplot(gwr_adaptative$SDF, "lsdpc", col = "transparent", main = "Map 4. Adaptive GWR long-time sick coefficients")
+```
+
+Map 4 shows the variation of long-time sickness and unemployment. Although most of the region shows positive values, the higher effects are observed as peaks in the central part of the region and in Manchester and close to Liverpool. This means that in these areas with large values, the effect of sickness in unemployment is greater.  
+
+```{r}
+# map for no qualifications
+spplot(gwr_adaptative$SDF, "Perc_noquals", col = "transparent", main = "Map 5. Adaptive GWR No qualifications coefficients")
+```
+
+Regarding no qualifications (map 5), the effects seem to continue to be sparse among the region. However, positive and high effects are located in the central part of the region and mostly in Manchester. Another interesting area is around Liverpool, where a small peak of high effects is observed in the city, but the surroundings have negative values. This could mean that urban areas concentrate high-skilled well-paid jobs, and having no qualifications have a stronger effect on unemployment whereas in rural environments.
+
+```{r}
+# plot local r-squared
+spplot(gwr_adaptative$SDF, "localR2", col = "transparent", main = "Map 6. Adaptive GWR R2 coefficients")
+```
+
+Finally, in map 6 the R2 of the GWR adaptive model shows interesting patterns; first, Cumbria region show the lowest R2 values, which indicates that the model may need recalibration. Secondly, outside Cumbria, the region shows large areas with the highest R2 squared values (0.9) in the central part, except for areas in the main cities of the region such as Liverpool, Manchester and south Chester. These peaks of lower R2 coefficients in urban areas may indicate that unemployment rates are not only tied to sickness and qualifications, but also due to other factors such as higher density of population..
+
+
+#### Conclusions
+In sum, the GWR models provide a useful tool to study spatial variation of variable relationships that linear models cannot provide. However, as all models, the results cannot be generalized as many factors affect in different degrees these relationships. In addition, the bandwidth selection for the GWR played a key role in examining the spatial variation of the model. Using the cross-validation bandwidth provided better outcomes and nuanced views of the model effect on areas, in contrast with the fixed bandwidth were outcomes were not as representative.
+
+
+#### References
+- Anselin, L. (1995) 'Local Indicators of Spatial Association-LISA', Geographical Analysis, 27(2), pp. 93-115. doi: 10.1111/j.1538-4632.1995.tb00338.x.
+- Anselin, L. and Rey, S.J. (2014) Modern spatial econometrics in practice : a guide to GeoDa, GeoDaSpace and PySAL. GeoDa Press.
+- Bambra, C. and Popham, F. (2010) 'Worklessness and regional differences in the social gradient in general health: Evidence from the 2001 English census', Health and Place, (5), pp. 1014.
+- Brunsdon, C., Fotheringham, A.S. and Charlton, M.E. (1996) 'Geographically Weighted Regression: A Method for Exploring Spatial Nonstationarity', Geographical Analysis, 28(4), pp. 281-298. doi: 10.1111/j.1538-4632.1996.tb00936.x.
+- MacKay, R.R. and Davies, L. (2008) 'Unemployment, permanent sickness, and nonwork in the United Kingdom', Environment and Planning A, 40(2), pp. 464-481. doi: 10.1068/a39155.
+- Stewart Fotheringham, A., Brunsdon, C. and Charlton, M. (2007) Quantitative Geography. London, England, United Kingdom: SAGE Publications, Ltd.
+- Tate, N.J. and Atkinson, P.M. (2001) Modelling scale in geographical information science. Wiley.
+- Tobler, W. (2004) 'On the First Law of Geography: A Reply', Annals of the Association of American Geographers, 94(2), pp. 304-310. doi: 10.1111/j.1467-8306.2004.09402009.x.
