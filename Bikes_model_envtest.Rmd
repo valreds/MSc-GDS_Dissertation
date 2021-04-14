@@ -1,5 +1,6 @@
 
-this notebook uses LSOA_newvariables_all
+this notebook uses LSOA_newvariables_all.
+What are these variables?
 
 
 ```{r}

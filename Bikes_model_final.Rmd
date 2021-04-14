@@ -1,6 +1,6 @@
 
 This notebook uses LSOA_newvariables_oldnev
-Check code and comment is this the final notebook or not?
+Check code and comment is this the final notebook?
 
 
 ```{r}
